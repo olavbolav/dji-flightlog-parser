@@ -156,6 +156,11 @@ class RecordReader:
             return None, offset, keychain
 
         payload_end = min(offset + length, len(self.data))
+        if offset + length > len(self.data):
+            logger.warning(
+                "Record payload truncated at offset %d: expected %d bytes, got %d",
+                offset, length, len(self.data) - offset,
+            )
         raw_payload = self.data[offset:payload_end]
 
         # Skip KeyStorage and KeyStorageRecover during normal record reading

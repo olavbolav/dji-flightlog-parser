@@ -9,6 +9,15 @@ from typing import Optional
 
 from ..frame.models import Frame
 
+_CSV_FORMULA_CHARS = frozenset("=+@\t\r")
+
+
+def _sanitize_csv(val: object) -> object:
+    """Prevent CSV formula injection in spreadsheet applications."""
+    if isinstance(val, str) and val and val[0] in _CSV_FORMULA_CHARS:
+        return "'" + val
+    return val
+
 
 HEADERS = [
     "CUSTOM.dateTime",
@@ -106,7 +115,7 @@ def export_csv(
     writer = csv.writer(output)
     writer.writerow(HEADERS)
     for f in frames:
-        writer.writerow(_frame_to_row(f))
+        writer.writerow([_sanitize_csv(v) for v in _frame_to_row(f)])
 
     result = output.getvalue()
 

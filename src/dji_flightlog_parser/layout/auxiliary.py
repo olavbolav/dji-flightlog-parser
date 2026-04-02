@@ -39,17 +39,34 @@ class AuxiliaryInfo:
 
     @classmethod
     def from_bytes(cls, data: bytes) -> AuxiliaryInfo:
+        if len(data) < 3:
+            raise ValueError(f"AuxiliaryInfo data too short: {len(data)} bytes (need >= 3)")
+
         offset = 0
         version_data = data[offset]
         offset += 1
 
         info_length = struct.unpack_from("<H", data, offset)[0]
         offset += 2
+        if offset + info_length > len(data):
+            raise ValueError(
+                f"AuxiliaryInfo info_data truncated: need {info_length} bytes at offset {offset}, "
+                f"but only {len(data) - offset} available"
+            )
         info_data = data[offset:offset + info_length]
         offset += info_length
 
+        if offset + 2 > len(data):
+            raise ValueError(
+                f"AuxiliaryInfo signature_length truncated at offset {offset} (data length {len(data)})"
+            )
         signature_length = struct.unpack_from("<H", data, offset)[0]
         offset += 2
+        if offset + signature_length > len(data):
+            raise ValueError(
+                f"AuxiliaryInfo signature_data truncated: need {signature_length} bytes at offset {offset}, "
+                f"but only {len(data) - offset} available"
+            )
         signature_data = data[offset:offset + signature_length]
 
         return cls(
@@ -87,12 +104,22 @@ class Auxiliary:
         Returns (Auxiliary, new_offset)."""
         from ..decoder.xor import xor_decode_block
 
+        if offset + 3 > len(data):
+            raise ValueError(
+                f"Auxiliary block truncated at offset {offset} (data length {len(data)}, need >= 3 bytes)"
+            )
+
         kind = data[offset]
         offset += 1
 
         size = struct.unpack_from("<H", data, offset)[0]
         offset += 2
 
+        if offset + size > len(data):
+            raise ValueError(
+                f"Auxiliary block data truncated: need {size} bytes at offset {offset}, "
+                f"but only {len(data) - offset} available"
+            )
         block_data = data[offset:offset + size]
 
         if kind == 0:

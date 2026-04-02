@@ -312,11 +312,11 @@ class Frame:
         """Compute derived values before emitting a frame."""
         if self.osd.height_max < self.osd.height:
             self.osd.height_max = self.osd.height
-        if self.osd.x_speed_max < self.osd.x_speed:
+        if abs(self.osd.x_speed_max) < abs(self.osd.x_speed):
             self.osd.x_speed_max = self.osd.x_speed
-        if self.osd.y_speed_max < self.osd.y_speed:
+        if abs(self.osd.y_speed_max) < abs(self.osd.y_speed):
             self.osd.y_speed_max = self.osd.y_speed
-        if self.osd.z_speed_max < self.osd.z_speed:
+        if abs(self.osd.z_speed_max) < abs(self.osd.z_speed):
             self.osd.z_speed_max = self.osd.z_speed
 
         cvs = self.battery.cell_voltages

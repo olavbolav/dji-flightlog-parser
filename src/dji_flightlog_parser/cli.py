@@ -60,16 +60,11 @@ def main(
             click.echo("Error: API key is required for version 13+", err=True)
             sys.exit(1)
 
-        request = log.keychains_request_with_custom_params(
-            department=api_custom_department,
-            version=api_custom_version,
-        )
-        from .keychain.api import fetch_keychains
-        from .keychain.models import build_keychain
-
         keychains = log.fetch_keychains(
             api_key,
             use_cache=not no_cache,
+            department=api_custom_department,
+            version=api_custom_version,
         )
 
     records = log.records(keychains)
