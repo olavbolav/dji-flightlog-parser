@@ -114,7 +114,7 @@ class DJILog:
     ) -> KeychainsRequest:
         """Scan the record stream for KeyStorage records and build the request."""
         # Determine version and department
-        req_version = version_override or (self._aux_version.version if self._aux_version else self.version)
+        req_version = version_override if version_override is not None else (self._aux_version.version if self._aux_version else self.version)
         req_department = department_override
 
         if req_department is None:
@@ -177,6 +177,8 @@ class DJILog:
         api_key: str,
         api_url: Optional[str] = None,
         use_cache: bool = True,
+        department: Optional[int] = None,
+        version: Optional[int] = None,
     ) -> list[Keychain]:
         """Fetch AES keychains from DJI API (sync).
 
@@ -189,7 +191,10 @@ class DJILog:
                 logger.info("Using cached keychains")
                 return cached
 
-        request = self.keychains_request()
+        if department is not None or version is not None:
+            request = self.keychains_request_with_custom_params(department, version)
+        else:
+            request = self.keychains_request()
         keychains = fetch_keychains(request, api_key, api_url)
 
         if use_cache:
@@ -210,8 +215,11 @@ class DJILog:
         product_type = int(self.details.product_type) if self.details else 0
 
         # For v13+, use keychains with rotation on KeyStorageRecover
-        if self.version >= 13 and keychains:
-            return self._read_records_with_keychains(record_data, keychains, product_type)
+        if self.version >= 13 and keychains is not None:
+            if len(keychains) == 0:
+                logger.warning("Empty keychains list for v%d file; records will not be decrypted", self.version)
+            else:
+                return self._read_records_with_keychains(record_data, keychains, product_type)
 
         kc: Keychain = keychains[0] if keychains else {}
         reader = RecordReader(record_data, self.version, product_type)
@@ -230,6 +238,7 @@ class DJILog:
         all_records: list[Record] = []
         offset = 0
         version = self.version
+        record_parser = RecordReader(b"", version, product_type)
 
         import struct
         while offset < len(record_data):
@@ -253,6 +262,11 @@ class DJILog:
                 offset += 2
 
             payload_end = min(offset + length, len(record_data))
+            if offset + length > len(record_data):
+                logger.warning(
+                    "Record payload truncated at offset %d: expected %d bytes, got %d",
+                    offset, length, len(record_data) - offset,
+                )
             raw_payload = record_data[offset:payload_end]
 
             if record_type_val == RecordType.KeyStorageRecover:
@@ -282,9 +296,7 @@ class DJILog:
                 raw_payload, record_type_val, version, current_kc, length
             )
 
-            # Parse record
-            reader = RecordReader(b"", version, product_type)
-            record = reader._parse_record(record_type_val, decoded, length)
+            record = record_parser._parse_record(record_type_val, decoded, length)
             all_records.append(record)
 
             offset = payload_end
@@ -313,8 +325,15 @@ def parse_file(
     log = DJILog.from_file(path)
 
     keychains = None
-    if log.version >= 13 and api_key:
-        keychains = log.fetch_keychains(api_key, api_url, use_cache)
+    if log.version >= 13:
+        if api_key:
+            keychains = log.fetch_keychains(api_key, api_url, use_cache)
+        else:
+            logger.warning(
+                "File is version %d (requires decryption) but no API key provided. "
+                "Output will contain undecrypted records.",
+                log.version,
+            )
 
     frames = log.frames(keychains)
 

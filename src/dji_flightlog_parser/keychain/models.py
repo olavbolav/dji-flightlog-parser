@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import base64
+import logging
 from dataclasses import dataclass, field
 from typing import Optional
 
 from ..decoder.feature_point import FeaturePoint
+
+logger = logging.getLogger(__name__)
 
 
 Keychain = dict[FeaturePoint, tuple[bytes, bytes]]  # {feature_point: (iv, key)}
@@ -56,15 +59,24 @@ def keychains_from_response(
     for group in data:
         group_fps = []
         for item in group:
-            fp_name = item["featurePoint"]
-            fp = FeaturePoint.from_api_name(fp_name)
-            aes_key = base64.b64decode(item["aesKey"])
-            aes_iv = base64.b64decode(item["aesIv"])
-            group_fps.append(KeychainFeaturePoint(
-                feature_point=fp,
-                aes_key=aes_key,
-                aes_iv=aes_iv,
-            ))
+            try:
+                fp_name = item.get("featurePoint")
+                aes_key_b64 = item.get("aesKey")
+                aes_iv_b64 = item.get("aesIv")
+                if not all((fp_name, aes_key_b64, aes_iv_b64)):
+                    logger.warning("Skipping keychain item with missing fields: %s", list(item.keys()))
+                    continue
+                fp = FeaturePoint.from_api_name(fp_name)
+                aes_key = base64.b64decode(aes_key_b64)
+                aes_iv = base64.b64decode(aes_iv_b64)
+                group_fps.append(KeychainFeaturePoint(
+                    feature_point=fp,
+                    aes_key=aes_key,
+                    aes_iv=aes_iv,
+                ))
+            except Exception as e:
+                logger.warning("Skipping invalid keychain item: %s", e)
+                continue
         result.append(group_fps)
     return result
 

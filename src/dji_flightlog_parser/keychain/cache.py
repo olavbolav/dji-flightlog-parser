@@ -6,6 +6,7 @@ import hashlib
 import json
 import base64
 import logging
+import tempfile
 from pathlib import Path
 from typing import Optional
 
@@ -23,7 +24,7 @@ class KeychainCache:
         self.cache_dir.mkdir(parents=True, exist_ok=True)
 
     def _cache_key(self, file_data: bytes) -> str:
-        return hashlib.sha256(file_data[:1024]).hexdigest()[:32]
+        return hashlib.sha256(file_data).hexdigest()[:32]
 
     def get(self, file_data: bytes) -> Optional[list[Keychain]]:
         key = self._cache_key(file_data)
@@ -60,5 +61,16 @@ class KeychainCache:
                 ]
             data.append(group)
 
-        path.write_text(json.dumps(data))
+        fd, tmp_path = tempfile.mkstemp(dir=self.cache_dir, suffix=".tmp")
+        try:
+            with open(fd, "w") as f:
+                json.dump(data, f)
+            tmp = Path(tmp_path)
+            tmp.chmod(0o600)
+            tmp.replace(path)
+        except OSError:
+            try:
+                Path(tmp_path).unlink(missing_ok=True)
+            except OSError:
+                pass
         logger.debug("Cached keychains for %s", key)

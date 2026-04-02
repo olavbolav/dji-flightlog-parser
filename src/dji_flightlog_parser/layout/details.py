@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import logging
 import math
 import struct
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import IntEnum
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 
 class ProductType(IntEnum):
@@ -177,8 +180,8 @@ class Details:
             return d
         try:
             d._parse(data, version)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Failed to parse flight details: %s", e)
         return d
 
     def _parse(self, data: bytes, version: int) -> None:

@@ -35,8 +35,9 @@ def aes_decrypt(ciphertext: bytes, key: bytes, iv: bytes) -> tuple[bytes, bytes]
         unpadder = PKCS7(128).unpadder()
         plaintext = unpadder.update(padded) + unpadder.finalize()
         return plaintext, next_iv
-    except Exception:
-        logger.debug("AES decryption failed, returning empty plaintext")
+    except Exception as e:
+        logger.warning("AES decryption failed (key=%d bytes, iv=%d bytes, ct=%d bytes): %s",
+                       len(key), len(iv), len(ciphertext), e)
         return b"", next_iv
 
 

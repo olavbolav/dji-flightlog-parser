@@ -35,7 +35,7 @@ def records_to_frames(records: list[Record], details: Optional[Details] = None) 
     A new frame is emitted each time an OSD record arrives.
     Non-OSD records update the current in-progress frame.
     """
-    product_type = details.product_type if details else ProductType.Unknown
+    product_type = details.product_type if details else ProductType.NONE
     cell_num = product_type.battery_cell_num()
     battery_num = product_type.battery_num()
 
