@@ -35,3 +35,7 @@ example_files/
 # OS
 .DS_Store
 Thumbs.db
+
+# Internal notes / diagnostic scripts
+DJI_QUESTIONS.md
+diagnose_*.py

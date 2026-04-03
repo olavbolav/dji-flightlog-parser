@@ -19,8 +19,13 @@ from ..record.smart_battery_group import SmartBatteryGroup, SmartBatteryDynamic,
 from ..record.ofdm import OFDM
 from ..record.custom import Custom
 from ..record.recover import Recover as RecoverRecord
-from ..record.app import AppTip, AppWarn, AppSeriousWarn
-from .models import Frame, FrameBattery
+from ..record.app import AppTip, AppWarn, AppSeriousWarn, AppGPS
+from ..record.vision import VisionGroup
+from ..record.fc_common_osd import FCCommonOSD
+from ..record.firmware import Firmware
+from ..record.component_serial import ComponentSerial
+from ..record.adsb import ADSBFlightData
+from .models import Frame, FrameBattery, FrameNearbyAircraft
 
 
 def _append_message(current: str, new: str) -> str:
@@ -165,6 +170,8 @@ def records_to_frames(records: list[Record], details: Optional[Details] = None) 
             frame.battery.current_capacity = data.current_capacity
             frame.battery.full_capacity = data.full_capacity
             frame.battery.is_cell_voltage_estimated = False
+            if data.loop_num > 0:
+                frame.battery.cycle_count = data.loop_num
 
             cell_num_actual = len(frame.battery.cell_voltages)
             cells = [data.voltage_cell1, data.voltage_cell2, data.voltage_cell3,
@@ -177,7 +184,14 @@ def records_to_frames(records: list[Record], details: Optional[Details] = None) 
             frame.battery.voltage = data.voltage
 
         elif rt == RecordType.SmartBatteryGroup and isinstance(data, SmartBatteryGroup):
-            if data.dynamic is not None:
+            if data.static is not None:
+                bs = data.static
+                if battery_num < 2 or bs.index == 1:
+                    if bs.loop_times > 0:
+                        frame.battery.cycle_count = bs.loop_times
+                    if bs.designed_capacity > 0 and bs.designed_capacity < 100000:
+                        frame.battery.designed_capacity = bs.designed_capacity
+            elif data.dynamic is not None:
                 bd = data.dynamic
                 if battery_num < 2 or bd.index == 1:
                     frame.battery.voltage = bd.current_voltage
@@ -246,6 +260,36 @@ def records_to_frames(records: list[Record], details: Optional[Details] = None) 
 
         elif rt == RecordType.AppSeriousWarn and isinstance(data, AppSeriousWarn):
             frame.app.warn = _append_message(frame.app.warn, data.message)
+
+        elif rt == RecordType.AppGPS and isinstance(data, AppGPS):
+            if data.latitude != 0.0 and data.longitude != 0.0:
+                frame.app_gps.latitude = data.latitude
+                frame.app_gps.longitude = data.longitude
+                frame.app_gps.horizontal_accuracy = data.horizontal_accuracy
+
+        elif rt == RecordType.VisionGroup and isinstance(data, VisionGroup):
+            frame.vision.collision_avoidance_enabled = data.collision_avoidance_enabled
+            frame.vision.is_braking = data.is_braking
+            frame.vision.is_ascent_limited = data.is_ascent_limited
+            frame.vision.is_landing_confirmation_needed = data.is_landing_confirmation_needed
+
+        elif rt == RecordType.FlightControllerCommonOSD and isinstance(data, FCCommonOSD):
+            if data.sub_type == 0:
+                frame.flight_controller.remaining_flight_time = data.remain_fly_time
+                frame.flight_controller.battery_percent_needed_to_land = data.land_capacity
+                frame.flight_controller.battery_percent_needed_to_go_home = data.go_home_capacity
+
+        elif rt == RecordType.ADSBFlightData and isinstance(data, ADSBFlightData):
+            frame.nearby_aircraft = [
+                FrameNearbyAircraft(
+                    icao_address=a.icao_address,
+                    latitude=a.latitude,
+                    longitude=a.longitude,
+                    altitude=a.altitude,
+                    heading=a.heading,
+                )
+                for a in data.aircraft
+            ]
 
     if frame_index > 0:
         frame.finalize()

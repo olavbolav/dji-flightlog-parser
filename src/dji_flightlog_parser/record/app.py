@@ -39,13 +39,22 @@ class AppSeriousWarn:
 
 @dataclass
 class AppGPS:
-    longitude: float = 0.0
+    """App/controller GPS position. Binary: lat(f64) + lon(f64) in degrees + accuracy(f32)."""
     latitude: float = 0.0
+    longitude: float = 0.0
+    horizontal_accuracy: float = -1.0
 
     @classmethod
     def from_bytes(cls, data: bytes, version: int = 14) -> AppGPS:
         if len(data) < 16:
             return cls()
-        lon = math.degrees(struct.unpack_from("<d", data, 0)[0])
-        lat = math.degrees(struct.unpack_from("<d", data, 8)[0])
-        return cls(longitude=lon, latitude=lat)
+        lat = struct.unpack_from("<d", data, 0)[0]
+        lon = struct.unpack_from("<d", data, 8)[0]
+        accuracy = -1.0
+        if len(data) >= 20:
+            accuracy = struct.unpack_from("<f", data, 16)[0]
+        if abs(lat) > 90.0:
+            lat = math.degrees(lat)
+        if abs(lon) > 180.0:
+            lon = math.degrees(lon)
+        return cls(latitude=lat, longitude=lon, horizontal_accuracy=accuracy)

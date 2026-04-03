@@ -335,7 +335,9 @@ def parse_file(
                 log.version,
             )
 
-    frames = log.frames(keychains)
+    records = log.records(keychains)
+    frames = records_to_frames(records, log.details)
+    log._last_records = records
 
     details_dict = log.details.to_dict()
 
@@ -386,4 +388,52 @@ def _build_summary(log: DJILog, frames: list[Frame], details_dict: dict) -> dict
         if any([r.rc_sn, r.aircraft_sn, r.battery_sn]):
             break  # Found recover data
 
+    _enrich_summary(log, frames, summary)
+
     return summary
+
+
+def _enrich_summary(log: DJILog, frames: list[Frame], summary: dict) -> None:
+    """Add component serials, firmware, and battery health to summary."""
+    from .record.component_serial import ComponentSerial
+    from .record.firmware import Firmware
+
+    records = getattr(log, "_last_records", None)
+    if records is None:
+        return
+
+    component_serials: dict[str, str] = {}
+    firmware_versions: list[dict] = []
+    firmware_seen: set[tuple] = set()
+
+    for r in records:
+        if isinstance(r.data, ComponentSerial) and r.data.serial:
+            comp_name = r.data.component_type.name
+            component_serials[comp_name] = r.data.serial
+
+        if isinstance(r.data, Firmware) and r.data.version:
+            key = (r.data.sender_type, r.data.sub_sender_type, r.data.version)
+            if key not in firmware_seen:
+                firmware_seen.add(key)
+                firmware_versions.append({
+                    "senderType": r.data.sender_type,
+                    "subSenderType": r.data.sub_sender_type,
+                    "version": r.data.version,
+                })
+
+    if component_serials:
+        summary["componentSerials"] = component_serials
+
+    if firmware_versions:
+        summary["firmwareVersions"] = firmware_versions
+
+    for f in frames:
+        b = f.battery
+        if b.cycle_count is not None:
+            summary["batteryCycleCount"] = b.cycle_count
+        if b.designed_capacity is not None:
+            summary["batteryDesignedCapacity"] = b.designed_capacity
+        if b.battery_serial:
+            summary["batterySerial"] = b.battery_serial
+        if b.cycle_count is not None:
+            break

@@ -59,6 +59,12 @@ HEADERS = [
     "RECOVER.aircraftName", "RECOVER.aircraftSn",
     "RECOVER.cameraSn", "RECOVER.rcSn", "RECOVER.batterySn",
     "APP.tip", "APP.warn",
+    "APPGPS.latitude", "APPGPS.longitude",
+    "BATTERY.cycleCount", "BATTERY.designedCapacity",
+    "VISION.collisionAvoidanceEnabled", "VISION.isBraking",
+    "VISION.isAscentLimited", "VISION.isLandingConfirmationNeeded",
+    "FC.remainingFlightTime", "FC.batteryPercentNeededToLand",
+    "FC.batteryPercentNeededToGoHome",
 ]
 
 
@@ -103,6 +109,12 @@ def _frame_to_row(f: Frame) -> list:
         f.recover.aircraft_name, f.recover.aircraft_sn,
         f.recover.camera_sn, f.recover.rc_sn, f.recover.battery_sn,
         f.app.tip, f.app.warn,
+        f.app_gps.latitude, f.app_gps.longitude,
+        f.battery.cycle_count, f.battery.designed_capacity,
+        f.vision.collision_avoidance_enabled, f.vision.is_braking,
+        f.vision.is_ascent_limited, f.vision.is_landing_confirmation_needed,
+        f.flight_controller.remaining_flight_time, f.flight_controller.battery_percent_needed_to_land,
+        f.flight_controller.battery_percent_needed_to_go_home,
     ]
 
 

@@ -189,6 +189,9 @@ class FrameBattery:
     temperature: float = 0.0
     min_temperature: float = 0.0
     max_temperature: float = 0.0
+    cycle_count: Optional[int] = None
+    designed_capacity: Optional[int] = None
+    battery_serial: str = ""
 
     def to_dict(self) -> dict:
         return {
@@ -205,6 +208,9 @@ class FrameBattery:
             "temperature": self.temperature,
             "minTemperature": self.min_temperature,
             "maxTemperature": self.max_temperature,
+            "cycleCount": self.cycle_count,
+            "designedCapacity": self.designed_capacity,
+            "batterySerial": self.battery_serial or None,
         }
 
 
@@ -289,6 +295,68 @@ class FrameApp:
 
 
 @dataclass
+class FrameAppGPS:
+    latitude: float = 0.0
+    longitude: float = 0.0
+    horizontal_accuracy: float = -1.0
+
+    def to_dict(self) -> dict:
+        return {
+            "latitude": self.latitude,
+            "longitude": self.longitude,
+            "horizontalAccuracy": self.horizontal_accuracy,
+        }
+
+
+@dataclass
+class FrameVision:
+    collision_avoidance_enabled: bool = False
+    is_braking: bool = False
+    is_ascent_limited: bool = False
+    is_landing_confirmation_needed: bool = False
+
+    def to_dict(self) -> dict:
+        return {
+            "collisionAvoidanceEnabled": self.collision_avoidance_enabled,
+            "isBraking": self.is_braking,
+            "isAscentLimited": self.is_ascent_limited,
+            "isLandingConfirmationNeeded": self.is_landing_confirmation_needed,
+        }
+
+
+@dataclass
+class FrameFlightController:
+    remaining_flight_time: Optional[int] = None
+    battery_percent_needed_to_land: Optional[int] = None
+    battery_percent_needed_to_go_home: Optional[int] = None
+
+    def to_dict(self) -> dict:
+        return {
+            "remainingFlightTime": self.remaining_flight_time,
+            "batteryPercentNeededToLand": self.battery_percent_needed_to_land,
+            "batteryPercentNeededToGoHome": self.battery_percent_needed_to_go_home,
+        }
+
+
+@dataclass
+class FrameNearbyAircraft:
+    icao_address: str = ""
+    latitude: float = 0.0
+    longitude: float = 0.0
+    altitude: int = 0
+    heading: float = 0.0
+
+    def to_dict(self) -> dict:
+        return {
+            "icaoAddress": self.icao_address,
+            "latitude": self.latitude,
+            "longitude": self.longitude,
+            "altitude": self.altitude,
+            "heading": round(self.heading, 1),
+        }
+
+
+@dataclass
 class Frame:
     custom: FrameCustom = field(default_factory=FrameCustom)
     osd: FrameOSD = field(default_factory=FrameOSD)
@@ -299,6 +367,10 @@ class Frame:
     home: FrameHome = field(default_factory=FrameHome)
     recover: FrameRecover = field(default_factory=FrameRecover)
     app: FrameApp = field(default_factory=FrameApp)
+    app_gps: FrameAppGPS = field(default_factory=FrameAppGPS)
+    vision: FrameVision = field(default_factory=FrameVision)
+    flight_controller: FrameFlightController = field(default_factory=FrameFlightController)
+    nearby_aircraft: list[FrameNearbyAircraft] = field(default_factory=list)
 
     def reset(self) -> None:
         """Reset transient fields between frames."""
@@ -349,4 +421,8 @@ class Frame:
             "home": self.home.to_dict(),
             "recover": self.recover.to_dict(),
             "app": self.app.to_dict(),
+            "appGps": self.app_gps.to_dict(),
+            "vision": self.vision.to_dict(),
+            "flightController": self.flight_controller.to_dict(),
+            "nearbyAircraft": [a.to_dict() for a in self.nearby_aircraft],
         }

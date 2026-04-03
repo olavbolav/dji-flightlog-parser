@@ -117,12 +117,14 @@ class SmartBatteryGroup:
 
     @classmethod
     def from_bytes(cls, data: bytes, version: int = 14) -> SmartBatteryGroup:
-        if len(data) < 1:
+        if len(data) < 2:
             return cls()
         kind = data[0]
         payload = data[1:]
         if kind == 1:
-            return cls(kind=1, static=SmartBatteryStatic.from_bytes(payload))
+            # Static records have an extra padding byte after the kind byte
+            static_payload = data[2:] if len(data) > 2 else payload
+            return cls(kind=1, static=SmartBatteryStatic.from_bytes(static_payload))
         elif kind == 2:
             return cls(kind=2, dynamic=SmartBatteryDynamic.from_bytes(payload))
         elif kind == 3:
