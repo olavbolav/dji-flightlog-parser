@@ -26,6 +26,9 @@ from .ofdm import OFDM
 from .mc_params import MCParams
 from .rc_gps import RCGPS
 from .rc_display import RCDisplayField
+from .vision import VisionGroup
+from .fc_common_osd import FCCommonOSD
+from .adsb import ADSBFlightData
 from .jpeg import JPEG
 from .unknown import UnknownRecord
 from ..decoder.aes import decode_record_payload
@@ -246,6 +249,12 @@ class RecordReader:
                 return Record(rt, OFDM.from_bytes(data, self.version))
             elif rt == RecordType.RCDisplayField:
                 return Record(rt, RCDisplayField.from_bytes(data, self.version))
+            elif rt == RecordType.VisionGroup:
+                return Record(rt, VisionGroup.from_bytes(data, self.version))
+            elif rt == RecordType.FlightControllerCommonOSD:
+                return Record(rt, FCCommonOSD.from_bytes(data, self.version))
+            elif rt == RecordType.ADSBFlightData:
+                return Record(rt, ADSBFlightData.from_bytes(data, self.version))
             else:
                 return Record(record_type_val, UnknownRecord(record_type=record_type_val, data=data))
         except Exception as e:
