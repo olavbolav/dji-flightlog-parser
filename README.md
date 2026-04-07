@@ -7,6 +7,12 @@ Enterprise-grade DJI flight log parser and decryptor for version 13 and 14 log f
 - Full decryption of v13/v14 DJI flight logs via the DJI OpenAPI keychains endpoint
 - CRC64-based XOR decoding and AES-256-CBC decryption with IV chaining
 - Comprehensive record parsing: OSD, Home, Gimbal, RC, Battery, Camera, GPS, IMU, OFDM, Vision/Perception, Navigation, and more
+- ADS-B / DJI AirSense support: nearby manned aircraft with ICAO address, position, altitude, and heading
+- Battery health data: cycle count, designed capacity, component serial numbers
+- Vision system state: collision avoidance, braking, ascent limiting
+- Flight controller estimates: remaining flight time, battery reserves for landing/go-home
+- Controller/app GPS position with horizontal accuracy
+- Component serial numbers and firmware versions in flight summary
 - Frame aggregation into normalized ~10 Hz telemetry frames
 - JSON output compatible with the Rust `dji-log-parser` (drop-in replacement)
 - GeoJSON, KML, and CSV export
@@ -188,40 +194,37 @@ class ParserService:
 
 ### JSON output compatibility
 
-The JSON output structure matches the Rust parser:
+The JSON output structure is compatible with the Rust parser, extended with additional fields:
 
 ```json
 {
   "version": 14,
-  "details": {
-    "subStreet": "",
-    "street": "",
-    "city": "",
-    "area": "",
-    "isFavorite": false,
-    "isNew": false,
-    "needsUpload": false,
-    "recordLineCount": 0,
+  "summary": {
+    "startTime": "2026-04-01T16:38:33.928000Z",
+    "startCoordinate": { "latitude": 59.7698, "longitude": 9.8774 },
+    "totalTime": 1741.4,
+    "totalDistance": 1.59,
+    "maxHeight": 71.0,
+    "maxHorizontalSpeed": 11.67,
+    "maxVerticalSpeed": 6.0,
     "aircraftName": "Matrice 4TD",
-    "aircraftSN": "...",
-    "cameraSN": "...",
-    "rcSN": "...",
-    "batteryUID": "...",
-    "productType": "NONE",
-    "startTime": "2025-06-10T08:15:00Z",
-    "totalTime": 754.0,
-    "totalDistance": 12345.6,
-    "maxHeight": 120.0,
-    "maxHorizontalSpeed": 15.2,
-    "maxVerticalSpeed": 5.1,
-    "photoNum": 0,
-    "videoTime": 0
+    "aircraftSn": "1581F8HGX255M00A",
+    "cameraSn": "53HFN470M7XDLE",
+    "rcSn": "8L5CN2M00131D2",
+    "batterySn": "87UPN3ACA000MR",
+    "componentSerials": { "RightCamera": "1581F8HGX255M00A0EX2" },
+    "firmwareVersions": [
+      { "senderType": 1, "subSenderType": 0, "version": "40.0.7" }
+    ],
+    "batteryCycleCount": 2,
+    "batteryDesignedCapacity": 7420
   },
   "frames": [
     {
       "osd": {
-        "latitude": 63.318,
-        "longitude": 10.300,
+        "flyTime": 0.0,
+        "latitude": 59.7698,
+        "longitude": 9.8774,
         "altitude": 45.2,
         "height": 42.1,
         "xSpeed": 0.1,
@@ -233,16 +236,52 @@ The JSON output structure matches the Rust parser:
         "flycState": "GPSAtti",
         "gpsNum": 30,
         "gpsLevel": 5,
-        "droneType": "UNKNOWN"
+        "isOnGround": false,
+        "isMotorOn": true,
+        "voltageWarning": 0
       },
       "gimbal": { "pitch": -45.0, "roll": 0.0, "yaw": 180.0 },
       "rc": { "aileron": 1024, "elevator": 1024, "throttle": 1024, "rudder": 1024 },
-      "battery": { "chargeLevel": 85, "voltage": 44200, "current": 5600, "temperature": 28.0 },
-      "camera": { "isPhoto": false, "isVideo": true }
+      "battery": {
+        "chargeLevel": 96,
+        "voltage": 24.592,
+        "current": 1.29,
+        "temperature": 21.7,
+        "cycleCount": 2,
+        "designedCapacity": 7420
+      },
+      "camera": { "isPhoto": false, "isVideo": true },
+      "appGps": {
+        "latitude": 59.7698,
+        "longitude": 9.8773,
+        "horizontalAccuracy": 117.6
+      },
+      "vision": {
+        "collisionAvoidanceEnabled": false,
+        "isBraking": false,
+        "isAscentLimited": false,
+        "isLandingConfirmationNeeded": false
+      },
+      "flightController": {
+        "remainingFlightTime": 1200,
+        "batteryPercentNeededToLand": 10,
+        "batteryPercentNeededToGoHome": 25
+      },
+      "nearbyAircraft": [
+        {
+          "icaoAddress": "4aca15",
+          "latitude": 59.9732,
+          "longitude": 10.1469,
+          "altitude": 4776,
+          "heading": 42.8
+        }
+      ]
     }
   ]
 }
 ```
+
+The `nearbyAircraft` array contains ADS-B data from the drone's AirSense receiver. Each entry represents a manned aircraft detected during the flight, with its ICAO transponder address, position, barometric altitude (feet), and track heading (degrees). The array is empty when no aircraft are nearby.
 
 ### Loggflyt Docker integration
 
