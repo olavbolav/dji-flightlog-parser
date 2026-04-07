@@ -11,7 +11,7 @@ Enterprise-grade DJI flight log parser and decryptor for version 13 and 14 log f
 - JSON output compatible with the Rust `dji-log-parser` (drop-in replacement)
 - GeoJSON, KML, and CSV export
 - Keychain response caching for repeated parsing
-- CLI with the same interface as the Rust `dji-log` tool
+- CLI with the same interface as the Rust `dji-log-parser` tool
 
 ## Installation
 
@@ -125,7 +125,7 @@ docker run --rm \
 
 ## Loggflyt Integration
 
-This parser is a drop-in replacement for the Rust `dji-log` binary used by [Loggflyt](https://github.com/olavbolav/Loggflyt). Below is the migration path.
+This parser is a drop-in replacement for the Rust `dji-log-parser` binary used by [Loggflyt](https://github.com/olavbolav/Loggflyt). Below is the migration path.
 
 ### What changes in Loggflyt
 
