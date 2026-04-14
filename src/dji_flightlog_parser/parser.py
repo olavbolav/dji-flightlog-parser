@@ -219,11 +219,15 @@ class DJILog:
             if len(keychains) == 0:
                 logger.warning("Empty keychains list for v%d file; records will not be decrypted", self.version)
             else:
-                return self._read_records_with_keychains(record_data, keychains, product_type)
+                result = self._read_records_with_keychains(record_data, keychains, product_type)
+                self.enrich_details(result)
+                return result
 
         kc: Keychain = keychains[0] if keychains else {}
         reader = RecordReader(record_data, self.version, product_type)
-        return reader.read_records(kc)
+        result = reader.read_records(kc)
+        self.enrich_details(result)
+        return result
 
     def _read_records_with_keychains(
         self,
@@ -355,7 +359,6 @@ def parse_file(
             )
 
     records = log.records(keychains)
-    log.enrich_details(records)
     log._last_records = records
     frames = records_to_frames(records, log.details)
 
