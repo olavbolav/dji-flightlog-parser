@@ -13,6 +13,7 @@ from pathlib import Path
 import click
 
 from .parser import DJILog
+from .frame.builder import records_to_frames
 from .export.json_export import export_json, export_json_raw
 from .export.geojson import export_geojson
 from .export.kml import export_kml
@@ -69,7 +70,7 @@ def main(
 
     records = log.records(keychains)
     log.enrich_details(records)
-    frames = log.frames(keychains)
+    frames = records_to_frames(records, log.details)
 
     # JSON export
     if raw:
