@@ -312,6 +312,7 @@ class DJILog:
     def frames(self, keychains: Optional[list[Keychain]] = None) -> list[Frame]:
         """Parse records and convert to normalized frames."""
         records = self.records(keychains)
+        self._last_records = records
         return records_to_frames(records, self.details)
 
     def enrich_details(self, records: list[Record]) -> None:
