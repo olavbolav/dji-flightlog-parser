@@ -247,7 +247,11 @@ def records_to_frames(records: list[Record], details: Optional[Details] = None) 
             frame.recover.app_platform = data.app_platform.name if hasattr(data.app_platform, 'name') else str(data.app_platform)
             frame.recover.app_version = data.app_version
             frame.recover.aircraft_name = data.aircraft_name
-            frame.recover.aircraft_sn = data.aircraft_sn
+            sn = data.aircraft_sn
+            if details and details.aircraft_sn and sn:
+                if details.aircraft_sn.startswith(sn) and len(details.aircraft_sn) > len(sn):
+                    sn = details.aircraft_sn
+            frame.recover.aircraft_sn = sn
             frame.recover.camera_sn = data.camera_sn
             frame.recover.rc_sn = data.rc_sn
             frame.recover.battery_sn = data.battery_sn
