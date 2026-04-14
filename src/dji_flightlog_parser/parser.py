@@ -339,10 +339,12 @@ def parse_file(
     frames = records_to_frames(records, log.details)
     log._last_records = records
 
+    # Build summary (also enriches log.details from ComponentSerial records)
     details_dict = log.details.to_dict()
-
-    # Build summary from details + first recover record
     summary = _build_summary(log, frames, details_dict)
+
+    # Rebuild details_dict after enrichment (e.g. full aircraft_sn from ComponentSerial)
+    details_dict = log.details.to_dict()
 
     return {
         "version": log.version,
