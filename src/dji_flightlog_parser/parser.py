@@ -423,6 +423,13 @@ def _enrich_summary(log: DJILog, frames: list[Frame], summary: dict) -> None:
 
     if component_serials:
         summary["componentSerials"] = component_serials
+        current_sn = summary.get("aircraftSn", "")
+        if current_sn:
+            for serial in component_serials.values():
+                if serial.startswith(current_sn) and len(serial) > len(current_sn):
+                    summary["aircraftSn"] = serial
+                    log.details.aircraft_sn = serial
+                    break
 
     if firmware_versions:
         summary["firmwareVersions"] = firmware_versions
