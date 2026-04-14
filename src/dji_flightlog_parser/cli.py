@@ -68,6 +68,7 @@ def main(
         )
 
     records = log.records(keychains)
+    log.enrich_details(records)
     frames = log.frames(keychains)
 
     # JSON export
