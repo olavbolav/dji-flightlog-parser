@@ -310,6 +310,25 @@ class DJILog:
         records = self.records(keychains)
         return records_to_frames(records, self.details)
 
+    def enrich_details(self, records: list[Record]) -> None:
+        """Enrich details from ComponentSerial records.
+
+        The Details binary block has a fixed 16-byte serial field which
+        truncates longer serials on newer drones. ComponentSerial records
+        use a length-prefixed format that preserves the full serial.
+        """
+        from .record.component_serial import ComponentSerial
+
+        current_sn = self.details.aircraft_sn
+        if not current_sn:
+            return
+
+        for r in records:
+            if isinstance(r.data, ComponentSerial) and r.data.serial:
+                if r.data.serial.startswith(current_sn) and len(r.data.serial) > len(current_sn):
+                    self.details.aircraft_sn = r.data.serial
+                    return
+
 
 def parse_file(
     path: str | Path,
@@ -336,15 +355,12 @@ def parse_file(
             )
 
     records = log.records(keychains)
-    frames = records_to_frames(records, log.details)
+    log.enrich_details(records)
     log._last_records = records
+    frames = records_to_frames(records, log.details)
 
-    # Build summary (also enriches log.details from ComponentSerial records)
     details_dict = log.details.to_dict()
     summary = _build_summary(log, frames, details_dict)
-
-    # Rebuild details_dict after enrichment (e.g. full aircraft_sn from ComponentSerial)
-    details_dict = log.details.to_dict()
 
     return {
         "version": log.version,
@@ -425,13 +441,6 @@ def _enrich_summary(log: DJILog, frames: list[Frame], summary: dict) -> None:
 
     if component_serials:
         summary["componentSerials"] = component_serials
-        current_sn = summary.get("aircraftSn", "")
-        if current_sn:
-            for serial in component_serials.values():
-                if serial.startswith(current_sn) and len(serial) > len(current_sn):
-                    summary["aircraftSn"] = serial
-                    log.details.aircraft_sn = serial
-                    break
 
     if firmware_versions:
         summary["firmwareVersions"] = firmware_versions
