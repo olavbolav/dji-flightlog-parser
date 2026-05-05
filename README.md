@@ -19,6 +19,199 @@ Enterprise-grade DJI flight log parser and decryptor for version 13 and 14 log f
 - Keychain response caching for repeated parsing
 - CLI with the same interface as the Rust `dji-log-parser` tool
 
+## Extracted Data Reference
+
+Every frame (emitted at ~10 Hz) contains the following data groups. The summary is emitted once per flight.
+
+### Summary (per flight)
+
+| Field | Type | Description |
+|---|---|---|
+| `startTime` | string | Flight start time (ISO 8601 UTC) |
+| `startCoordinate` | object | `{ latitude, longitude }` of takeoff point |
+| `totalTime` | float | Total flight duration (seconds) |
+| `totalDistance` | float | Total distance traveled (km) |
+| `maxHeight` | float | Maximum height above takeoff (meters) |
+| `maxHorizontalSpeed` | float | Maximum horizontal speed (m/s) |
+| `maxVerticalSpeed` | float | Maximum vertical speed (m/s) |
+| `aircraftName` | string | Aircraft model name (e.g. "Matrice 4TD") |
+| `aircraftSn` | string | Aircraft serial number |
+| `cameraSn` | string | Camera serial number |
+| `rcSn` | string | Remote controller serial number |
+| `batterySn` | string | Battery serial number |
+| `appPlatform` | string | Controller app platform ("Android" / "iOS") |
+| `appVersion` | string | Controller app version |
+| `productType` | string | DJI product type identifier |
+| `componentSerials` | object | Map of component name to serial (e.g. `{ "RightCamera": "..." }`) |
+| `firmwareVersions` | array | `[{ senderType, subSenderType, version }]` for each module |
+| `batteryCycleCount` | int | Battery charge cycle count |
+| `batteryDesignedCapacity` | int | Factory designed capacity (mAh) |
+| `batterySerial` | string | Battery serial (when available from SmartBattery records) |
+
+### OSD — On-Screen Display / Flight Telemetry
+
+| Field | Type | Description |
+|---|---|---|
+| `flyTime` | float | Time since motors started (seconds) |
+| `latitude` | float | Drone latitude (degrees) |
+| `longitude` | float | Drone longitude (degrees) |
+| `height` | float | Height above takeoff point (meters) |
+| `heightMax` | float | Max height reached this flight (meters) |
+| `vpsHeight` | float | Visual Positioning System height (meters) |
+| `altitude` | float | Altitude above sea level (meters, home altitude + height) |
+| `xSpeed` / `ySpeed` / `zSpeed` | float | Speed in body axes (m/s) |
+| `xSpeedMax` / `ySpeedMax` / `zSpeedMax` | float | Max speed reached in each axis (m/s) |
+| `pitch` / `roll` / `yaw` | float | Aircraft attitude (degrees) |
+| `flycState` | string | Flight controller mode (e.g. "GPSAtti", "Waypoint", "GoHome") |
+| `flycCommand` | string | Active command from app |
+| `flightAction` | string | Current flight action |
+| `isGpdUsed` | bool | Whether GPS is used for positioning |
+| `nonGpsCause` | string | Reason GPS is not used |
+| `gpsNum` | int | Number of GPS satellites |
+| `gpsLevel` | int | GPS signal level (0–5) |
+| `droneType` | string | Drone type identifier |
+| `goHomeStatus` | string | Go-home state ("Standby", "GoingHome", etc.) |
+| `batteryType` | string | Battery type ("Smart", "NonSmart") |
+| `isOnGround` | bool | Whether the drone is on the ground |
+| `isMotorOn` | bool | Whether motors are spinning |
+| `isMotorBlocked` | bool | Motor blocked flag |
+| `motorStartFailedCause` | string | Reason motor failed to start |
+| `isImuPreheated` | bool | IMU preheat status |
+| `imuInitFailReason` | string | IMU initialization failure reason |
+| `isAcceletorOverRange` | bool | Accelerometer over range |
+| `isBarometerDeadInAir` | bool | Barometer failure in flight |
+| `isCompassError` | bool | Compass error |
+| `isGoHomeHeightModified` | bool | Go-home height modified flag |
+| `isNotEnoughForce` | bool | Insufficient thrust |
+| `isOutOfLimit` | bool | Flight boundary reached |
+| `isPropellerCatapult` | bool | Propeller catapult detected |
+| `isVibrating` | bool | Abnormal vibration detected |
+| `isVisionUsed` | bool | Vision system active for positioning |
+| `voltageWarning` | int | Battery voltage warning level (0 = none) |
+
+### Gimbal
+
+| Field | Type | Description |
+|---|---|---|
+| `mode` | string | Gimbal mode ("YawFollow", "Free", etc.) |
+| `pitch` / `roll` / `yaw` | float | Gimbal angles (degrees) |
+| `isPitchAtLimit` | bool | Pitch axis at mechanical limit |
+| `isRollAtLimit` | bool | Roll axis at mechanical limit |
+| `isYawAtLimit` | bool | Yaw axis at mechanical limit |
+| `isStuck` | bool | Gimbal stuck |
+
+### Camera
+
+| Field | Type | Description |
+|---|---|---|
+| `isPhoto` | bool | Photo shutter triggered this frame |
+| `isVideo` | bool | Video recording active |
+| `sdCardIsInserted` | bool | SD card present |
+| `sdCardState` | string | SD card state |
+
+### RC — Remote Controller
+
+| Field | Type | Description |
+|---|---|---|
+| `aileron` | int | Right stick horizontal (roll) |
+| `elevator` | int | Right stick vertical (pitch) |
+| `throttle` | int | Left stick vertical |
+| `rudder` | int | Left stick horizontal (yaw) |
+| `downlinkSignal` | int | Video downlink signal strength (%) |
+| `uplinkSignal` | int | Control uplink signal strength (%) |
+
+### Battery
+
+| Field | Type | Description |
+|---|---|---|
+| `chargeLevel` | int | Current charge level (%) |
+| `voltage` | float | Total battery voltage (V) |
+| `current` | float | Discharge current (A) |
+| `currentCapacity` | int | Remaining capacity (mAh) |
+| `fullCapacity` | int | Full charge capacity (mAh) |
+| `cellNum` | int | Number of cells |
+| `cellVoltages` | array | Per-cell voltages (V) |
+| `isCellVoltageEstimated` | bool | True if cell voltages are computed from total voltage |
+| `cellVoltageDeviation` | float | Max-min cell voltage difference (V) |
+| `maxCellVoltageDeviation` | float | Highest cell deviation during flight (V) |
+| `temperature` | float | Battery temperature (°C) |
+| `minTemperature` / `maxTemperature` | float | Temperature range during flight (°C) |
+| `cycleCount` | int | Charge cycle count |
+| `designedCapacity` | int | Factory designed capacity (mAh) |
+| `batterySerial` | string | Battery serial number |
+
+### Home — Home Point and Flight Limits
+
+| Field | Type | Description |
+|---|---|---|
+| `latitude` / `longitude` | float | Home point coordinates |
+| `altitude` | float | Home point altitude (meters ASL) |
+| `heightLimit` | float | Maximum allowed height (meters) |
+| `isHomeRecord` | bool | Whether this is a valid home point record |
+| `goHomeMode` | string | Go-home mode |
+| `isDynamicHomePointEnabled` | bool | Dynamic home point tracking active |
+| `isNearDistanceLimit` | bool | Near max distance from home |
+| `isNearHeightLimit` | bool | Near max height limit |
+| `isCompassCalibrating` | bool | Compass calibration in progress |
+| `compassCalibrationState` | string | Calibration state |
+| `isBeginnerMode` | bool | Beginner mode active |
+| `goHomeHeight` | int | Go-home altitude (meters) |
+| `maxAllowedHeight` | float | Regulatory max height (meters) |
+
+### App GPS — Controller/Phone Position
+
+| Field | Type | Description |
+|---|---|---|
+| `latitude` / `longitude` | float | Controller/phone GPS position (degrees) |
+| `horizontalAccuracy` | float | GPS horizontal accuracy (meters) |
+
+### Vision — Obstacle Avoidance State
+
+| Field | Type | Description |
+|---|---|---|
+| `collisionAvoidanceEnabled` | bool | Collision avoidance system active |
+| `isBraking` | bool | Drone is braking due to obstacle |
+| `isAscentLimited` | bool | Ascent limited by obstacle above |
+| `isLandingConfirmationNeeded` | bool | Landing confirmation needed (obstacle below) |
+
+### Flight Controller — Battery and Time Estimates
+
+| Field | Type | Description |
+|---|---|---|
+| `remainingFlightTime` | int | Estimated remaining flight time (seconds) |
+| `batteryPercentNeededToLand` | int | Battery % needed to land at current position |
+| `batteryPercentNeededToGoHome` | int | Battery % needed to return to home point and land |
+
+### Nearby Aircraft — ADS-B / DJI AirSense
+
+Array of detected manned aircraft (empty when none are nearby).
+
+| Field | Type | Description |
+|---|---|---|
+| `icaoAddress` | string | ICAO 24-bit transponder address (hex, e.g. "47875a") |
+| `latitude` / `longitude` | float | Aircraft position (degrees) |
+| `altitude` | int | Barometric altitude (feet) |
+| `heading` | float | Track heading (degrees, 0–360) |
+
+### Recover — Device Identity
+
+| Field | Type | Description |
+|---|---|---|
+| `appPlatform` | string | App platform |
+| `appVersion` | string | App version |
+| `aircraftName` | string | Aircraft model name |
+| `aircraftSn` | string | Aircraft serial number |
+| `cameraSn` | string | Camera serial number |
+| `rcSn` | string | Remote controller serial number |
+| `batterySn` | string | Battery serial number |
+
+### App Messages
+
+| Field | Type | Description |
+|---|---|---|
+| `tip` | string | Informational messages (flight mode changes, gimbal events) |
+| `warn` | string | Warning messages (app warnings, serious warnings) |
+
 ## Installation
 
 ### From source
