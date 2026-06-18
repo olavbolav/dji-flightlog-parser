@@ -321,70 +321,6 @@ docker run --rm \
   -e app_key=YOUR_DJI_API_KEY \
   dji-flightlog-parser-test
 ```
-
-## Loggflyt Integration
-
-This parser is a drop-in replacement for the Rust `dji-log-parser` binary used by [Loggflyt](https://github.com/olavbolav/Loggflyt). Below is the migration path.
-
-### What changes in Loggflyt
-
-Loggflyt's `app/core/parser.py` calls the Rust binary via subprocess:
-
-```python
-cmd = ["dji-log", "--api-key", self.api_key, "--output", output_path, input_path]
-```
-
-#### Option A: Symlink (zero code changes in Loggflyt)
-
-The Docker image creates a `dji-log` symlink pointing to `dji-flightlog-parser`. If this parser is installed in the same container or `PATH`, Loggflyt works without any code changes:
-
-```bash
-# Already done in the Dockerfile, but if installing manually:
-ln -s $(which dji-flightlog-parser) /usr/local/bin/dji-log
-```
-
-#### Option B: Use the Python API directly (recommended for production)
-
-Replace the subprocess call with a direct Python import for better performance, error handling, and no process overhead:
-
-```python
-# app/core/parser.py — updated for dji-flightlog-parser
-import json
-import logging
-from dji_flightlog_parser import DJILog
-from dji_flightlog_parser.export.json_export import export_json, export_json_raw
-from dji_flightlog_parser.export.geojson import export_geojson
-from app.core.config import settings
-
-logger = logging.getLogger(__name__)
-
-
-class ParserService:
-    def __init__(self):
-        self.api_key = settings.DJI_PARSER_API_KEY
-
-    def parse_log(self, input_path: str, output_path: str, timeout: int = 300):
-        log = DJILog.from_file(input_path)
-        keychains = log.fetch_keychains(self.api_key)
-        frames = log.frames(keychains)
-        json_str = export_json(log.version, log.details, frames, output_path)
-        return json.loads(json_str)
-
-    def parse_log_raw(self, input_path: str, output_path: str, timeout: int = 300):
-        log = DJILog.from_file(input_path)
-        keychains = log.fetch_keychains(self.api_key)
-        records = log.records(keychains)
-        json_str = export_json_raw(log.version, log.details, records, output_path)
-        return json.loads(json_str)
-
-    def generate_geojson(self, input_path: str, output_path: str):
-        log = DJILog.from_file(input_path)
-        keychains = log.fetch_keychains(self.api_key)
-        frames = log.frames(keychains)
-        export_geojson(log.details, frames, output_path)
-        return True
-```
-
 ### JSON output compatibility
 
 The JSON output structure is compatible with the Rust parser, extended with additional fields:
@@ -475,24 +411,6 @@ The JSON output structure is compatible with the Rust parser, extended with addi
 ```
 
 The `nearbyAircraft` array contains ADS-B data from the drone's AirSense receiver. Each entry represents a manned aircraft detected during the flight, with its ICAO transponder address, position, barometric altitude (feet), and track heading (degrees). The array is empty when no aircraft are nearby.
-
-### Loggflyt Docker integration
-
-Add `dji-flightlog-parser` to Loggflyt's Docker image. In Loggflyt's `Dockerfile`:
-
-```dockerfile
-# Install dji-flightlog-parser from the git repository
-RUN pip install --no-cache-dir git+https://github.com/olavbolav/dji_flightlog_parser.git
-
-# Create dji-log symlink for backward compatibility
-RUN ln -s $(which dji-flightlog-parser) /usr/local/bin/dji-log
-```
-
-Or if using Option B (direct Python API), just add to Loggflyt's `requirements.txt`:
-
-```
-dji-flightlog-parser @ git+https://github.com/olavbolav/dji_flightlog_parser.git
-```
 
 ## Testing
 
