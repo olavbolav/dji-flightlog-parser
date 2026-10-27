@@ -21,6 +21,20 @@ DEFAULT_API_URL = "https://dev.dji.com/openapi/v1/flight-records/keychains"
 TIMEOUT = 30.0
 
 
+class KeychainAPIError(RuntimeError):
+    """Error result returned by the DJI keychains API."""
+
+    def __init__(self, msg: str, code: Optional[int] = None):
+        super().__init__(f"DJI API error: {msg} (code={code})")
+        self.msg = msg
+        self.code = code
+
+    @property
+    def is_invalid_ciphertext(self) -> bool:
+        """True when DJI could not decrypt the KeyStorage ciphertext for this department."""
+        return "invalid ciphertext" in self.msg.lower()
+
+
 def fetch_keychains(
     request: KeychainsRequest,
     api_key: str,
@@ -44,8 +58,7 @@ def fetch_keychains(
 
     result = body.get("result", {})
     if result.get("code") != 0:
-        msg = result.get("msg", "Unknown error")
-        raise RuntimeError(f"DJI API error: {msg} (code={result.get('code')})")
+        raise KeychainAPIError(result.get("msg", "Unknown error"), result.get("code"))
 
     data = body.get("data", [])
     groups = keychains_from_response(data)
@@ -76,8 +89,7 @@ async def fetch_keychains_async(
 
     result = body.get("result", {})
     if result.get("code") != 0:
-        msg = result.get("msg", "Unknown error")
-        raise RuntimeError(f"DJI API error: {msg} (code={result.get('code')})")
+        raise KeychainAPIError(result.get("msg", "Unknown error"), result.get("code"))
 
     data = body.get("data", [])
     groups = keychains_from_response(data)
