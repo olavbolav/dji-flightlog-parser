@@ -10,6 +10,7 @@ from typing import Optional
 from .layout.prefix import Prefix, PREFIX_SIZE
 from .layout.auxiliary import Auxiliary, Department
 from .layout.details import Details
+from .decoder.aes import decode_record_payload
 from .decoder.feature_point import FeaturePoint
 from .keychain.models import (
     Keychain, KeychainsRequest, EncodedKeychainFeaturePoint,
@@ -287,15 +288,20 @@ class DJILog:
                     offset += 1
                 continue
 
-            # Skip summary/frame markers
+            # 0xFD/0xFE records are not parsed, but in v14 they are encrypted in
+            # the DJIFlyCustom IV chain. Skipping them without decoding leaves the
+            # next Custom/AppTip/AppWarn/AppSeriousWarn record with a stale IV and
+            # a garbled first 16 bytes.
             if record_type_val in (0xFD, 0xFE):
+                _, current_kc = decode_record_payload(
+                    raw_payload, record_type_val, version, current_kc, length
+                )
                 offset = payload_end
                 if offset < len(record_data) and record_data[offset] == 0xFF:
                     offset += 1
                 continue
 
             # Decode payload
-            from .decoder.aes import decode_record_payload
             decoded, current_kc = decode_record_payload(
                 raw_payload, record_type_val, version, current_kc, length
             )
