@@ -114,6 +114,7 @@ _V14_MAP: dict[int, FeaturePoint] = {
     54: FeaturePoint.DJIFlyCustomFeature,   # GOBusiness
     55: FeaturePoint.SecurityFeature,       # Unknown/Security
     56: FeaturePoint.PlaintextFeature,      # KeyStorage
+    57: FeaturePoint.AirLinkFeature,        # Radio link levels (shares IV chain with 49)
     58: FeaturePoint.BaseFeature,           # HealthGroup
     59: FeaturePoint.BaseFeature,           # FCIMUInfo
     62: FeaturePoint.RCFeature,             # RCDisplayField

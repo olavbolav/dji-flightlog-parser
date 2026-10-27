@@ -32,7 +32,9 @@ def test_record_type_mapping_v14():
     assert feature_point_from_record_type(4, 14) == FeaturePoint.RCFeature
     assert feature_point_from_record_type(7, 14) == FeaturePoint.BatteryFeature
     assert feature_point_from_record_type(25, 14) == FeaturePoint.CameraFeature
+    assert feature_point_from_record_type(49, 14) == FeaturePoint.AirLinkFeature
     assert feature_point_from_record_type(56, 14) == FeaturePoint.PlaintextFeature
+    assert feature_point_from_record_type(57, 14) == FeaturePoint.AirLinkFeature
 
 
 def test_record_type_mapping_v13():
