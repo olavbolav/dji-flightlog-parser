@@ -118,6 +118,8 @@ _V14_MAP: dict[int, FeaturePoint] = {
     59: FeaturePoint.BaseFeature,           # FCIMUInfo
     62: FeaturePoint.RCFeature,             # RCDisplayField
     63: FeaturePoint.BaseFeature,           # FlightControllerCommonOSD
+    253: FeaturePoint.DJIFlyCustomFeature,  # 0xFD, not parsed (advances the IV chain shared with 5/9/10/24)
+    254: FeaturePoint.DJIFlyCustomFeature,  # 0xFE, not parsed (advances the IV chain shared with 5/9/10/24)
 }
 
 _V13_MAP: dict[int, FeaturePoint] = {
