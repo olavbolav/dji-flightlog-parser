@@ -179,8 +179,12 @@ class RecordReader:
                 offset += 1
             return None, offset, keychain
 
-        # JPEG/Summary records: skip payload and terminator
+        # 0xFD/0xFE records are not parsed, but in v14 they are encrypted in
+        # the DJIFlyCustom IV chain, so decode them to keep that chain in step.
         if record_type_val == 0xFD or record_type_val == 0xFE:
+            _, keychain = decode_record_payload(
+                raw_payload, record_type_val, self.version, keychain, length
+            )
             offset = payload_end
             if offset < len(self.data) and self.data[offset] == END_BYTE:
                 offset += 1
