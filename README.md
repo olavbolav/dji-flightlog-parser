@@ -17,6 +17,7 @@ DJI flight log parser and decryptor for version 13 and 14 log files. Decrypts, p
 - JSON output compatible with the Rust `dji-log-parser` (drop-in replacement)
 - GeoJSON, KML, and CSV export
 - Keychain response caching for repeated parsing
+- Automatic keychain department fallback for logs recorded through the DJI Mobile SDK
 - CLI with the same interface as the Rust `dji-log-parser` tool
 
 ## Extracted Data Reference
@@ -274,6 +275,8 @@ print(log.details.aircraft_name)
 print(log.details.product_type)
 ```
 
+Logs recorded by Mobile SDK apps carry `department=SDK` in their header, which the DJI keychains API rejects with `invalid ciphertext`. When no department is given, `fetch_keychains` then retries as other departments (DJIGO first) and accepts the first keys whose decrypted OSD records contain valid positions. The accepted keys are cached like any other result. Pass `department_fallback=False` to disable this, or `department=...` to request a specific department (cached separately).
+
 ### Export programmatically
 
 ```python
@@ -416,7 +419,8 @@ The `nearbyAircraft` array contains ADS-B data from the drone's AirSense receive
 
 ```bash
 # Unit tests only (no API key needed)
-pytest tests/test_xor.py tests/test_prefix.py tests/test_osd.py tests/test_feature_point.py -v
+pytest tests/test_xor.py tests/test_prefix.py tests/test_osd.py tests/test_feature_point.py \
+    tests/test_aes_chain.py tests/test_department_fallback.py -v
 
 # Full test suite (requires example files and API key in .env)
 pytest tests/ -v
