@@ -17,17 +17,22 @@ logger = logging.getLogger(__name__)
 
 
 class KeychainCache:
-    """File-based cache for DJI keychains, keyed by file content hash."""
+    """File-based cache for DJI keychains, keyed by file content hash.
+
+    ``variant`` separates entries fetched with non-default request parameters
+    (e.g. a department override) from the default entry for the same file.
+    """
 
     def __init__(self, cache_dir: Optional[Path] = None):
         self.cache_dir = cache_dir or Path.home() / ".cache" / "dji-flightlog-parser"
         self.cache_dir.mkdir(parents=True, exist_ok=True)
 
-    def _cache_key(self, file_data: bytes) -> str:
-        return hashlib.sha256(file_data).hexdigest()[:32]
+    def _cache_key(self, file_data: bytes, variant: str = "") -> str:
+        key = hashlib.sha256(file_data).hexdigest()[:32]
+        return f"{key}-{variant}" if variant else key
 
-    def get(self, file_data: bytes) -> Optional[list[Keychain]]:
-        key = self._cache_key(file_data)
+    def get(self, file_data: bytes, variant: str = "") -> Optional[list[Keychain]]:
+        key = self._cache_key(file_data, variant)
         path = self.cache_dir / f"{key}.json"
         if not path.exists():
             return None
@@ -47,8 +52,8 @@ class KeychainCache:
             logger.warning("Failed to load cached keychains: %s", e)
             return None
 
-    def put(self, file_data: bytes, keychains: list[Keychain]) -> None:
-        key = self._cache_key(file_data)
+    def put(self, file_data: bytes, keychains: list[Keychain], variant: str = "") -> None:
+        key = self._cache_key(file_data, variant)
         path = self.cache_dir / f"{key}.json"
 
         data = []

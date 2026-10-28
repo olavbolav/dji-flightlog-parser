@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from collections import deque
+from dataclasses import replace
 from pathlib import Path
 from typing import Optional
 
@@ -15,14 +16,21 @@ from .keychain.models import (
     Keychain, KeychainsRequest, EncodedKeychainFeaturePoint,
     build_keychain,
 )
-from .keychain.api import fetch_keychains
+from .keychain.api import KeychainAPIError, fetch_keychains
 from .keychain.cache import KeychainCache
+from .record.osd import OSD
 from .record.reader import RecordReader, Record
 from .record.types import RecordType
 from .frame.builder import records_to_frames
 from .frame.models import Frame
 
 logger = logging.getLogger(__name__)
+
+# Departments tried, in order, when the DJI API rejects the department in the
+# log header. Logs recorded through the Mobile SDK carry department=SDK, which
+# the keychains API answers with "invalid ciphertext"; requesting the same keys
+# as DJIGO (2) returns working keys.
+FALLBACK_DEPARTMENTS = (2, 3, 4, 5, 6, 7, 8)
 
 
 class DJILog:
@@ -179,14 +187,24 @@ class DJILog:
         use_cache: bool = True,
         department: Optional[int] = None,
         version: Optional[int] = None,
+        department_fallback: bool = True,
     ) -> list[Keychain]:
         """Fetch AES keychains from DJI API (sync).
 
-        Caches results to avoid redundant API calls.
+        Caches results to avoid redundant API calls. Requests with a
+        department or version override are cached separately from the
+        default entry for the file.
+
+        If the API rejects the log's own department with "invalid ciphertext"
+        (as it does for logs recorded through the Mobile SDK) and no department
+        was given, the departments in FALLBACK_DEPARTMENTS are tried in turn.
+        Keys are accepted only if the OSD records they decrypt look sane, and
+        the accepted keys are cached under the default entry.
         """
+        cache_variant = _cache_variant(department, version)
         if use_cache:
             cache = KeychainCache()
-            cached = cache.get(self._data)
+            cached = cache.get(self._data, cache_variant)
             if cached is not None:
                 logger.info("Using cached keychains")
                 return cached
@@ -195,13 +213,58 @@ class DJILog:
             request = self.keychains_request_with_custom_params(department, version)
         else:
             request = self.keychains_request()
-        keychains = fetch_keychains(request, api_key, api_url)
+
+        try:
+            keychains = fetch_keychains(request, api_key, api_url)
+        except KeychainAPIError as e:
+            if not (department_fallback and department is None and e.is_invalid_ciphertext):
+                raise
+            keychains = self._fetch_keychains_other_department(request, api_key, api_url, e)
 
         if use_cache:
             cache = KeychainCache()
-            cache.put(self._data, keychains)
+            cache.put(self._data, keychains, cache_variant)
 
         return keychains
+
+    def _fetch_keychains_other_department(
+        self,
+        request: KeychainsRequest,
+        api_key: str,
+        api_url: Optional[str],
+        error: KeychainAPIError,
+    ) -> list[Keychain]:
+        """Retry a rejected keychains request as other departments.
+
+        The API can return keys for a department that do not decrypt this log,
+        so each candidate is checked against the decrypted OSD records.
+        Raises the original error if no department yields sane records.
+        """
+        for department in FALLBACK_DEPARTMENTS:
+            if department == request.department:
+                continue
+            try:
+                keychains = fetch_keychains(replace(request, department=department), api_key, api_url)
+            except KeychainAPIError as e:
+                logger.debug("Keychains request as department=%d failed: %s", department, e)
+                continue
+            if _osd_looks_sane(self._decrypt_records(keychains)):
+                logger.info(
+                    "DJI API rejected department=%d (%s); using keychains requested as department=%d",
+                    request.department, error.msg, department,
+                )
+                return keychains
+            logger.debug("Keychains for department=%d do not decrypt this log", department)
+        raise error
+
+    def _decrypt_records(self, keychains: list[Keychain]) -> list[Record]:
+        """Decrypt records with the given keychains without touching details."""
+        records_start = self.prefix.records_offset()
+        records_end = self.prefix.records_end_offset(len(self._data))
+        product_type = int(self.details.product_type) if self.details else 0
+        return self._read_records_with_keychains(
+            self._data[records_start:records_end], keychains, product_type,
+        )
 
     def records(self, keychains: Optional[list[Keychain]] = None) -> list[Record]:
         """Parse all records from the file.
@@ -333,6 +396,29 @@ class DJILog:
                 if r.data.serial.startswith(current_sn) and len(r.data.serial) > len(current_sn):
                     self.details.aircraft_sn = r.data.serial
                     return
+
+
+def _cache_variant(department: Optional[int], version: Optional[int]) -> str:
+    """Cache variant name for a keychains request with optional overrides."""
+    parts = []
+    if department is not None:
+        parts.append(f"d{department}")
+    if version is not None:
+        parts.append(f"v{version}")
+    return "-".join(parts)
+
+
+def _osd_looks_sane(records: list[Record], min_osd: int = 10, min_fraction: float = 0.8) -> bool:
+    """Heuristic check that OSD records were decrypted with the right keys.
+
+    Wrongly decrypted OSD records come out empty or as noise, so require that
+    most of them carry a valid, non-zero latitude and a plausible satellite count.
+    """
+    osds = [r.data for r in records if r.record_type == RecordType.OSD and isinstance(r.data, OSD)]
+    if len(osds) < min_osd:
+        return False
+    ok = sum(1 for o in osds if -90 < o.latitude < 90 and o.latitude != 0 and 0 <= o.gps_num < 80)
+    return ok / len(osds) > min_fraction
 
 
 def parse_file(
