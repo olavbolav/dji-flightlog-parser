@@ -57,10 +57,14 @@ class RecordType(IntEnum):
     GOBusiness = 54
     Security = 55
     KeyStorage = 56
+    AirLinkDataField = 57  # DJI name GOAirLinkDataField
     HealthGroup = 58
     FCIMUInfo = 59
     RCDisplayField = 62
     FlightControllerCommonOSD = 63
+    # 0xFD, DJIFlyCustom key/value snapshot; emitted on v14 only. Its sibling
+    # 0xFE (value changes) is decrypted to keep the IV chain but not emitted.
+    KeyValueSnapshot = 253
 
     @classmethod
     def from_value(cls, val: int) -> "RecordType | int":

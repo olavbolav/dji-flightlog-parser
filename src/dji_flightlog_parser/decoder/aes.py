@@ -95,7 +95,9 @@ def decode_record_payload(
     # v13+: check if AES needed
     fp = feature_point_from_record_type(record_type, version)
 
-    if fp == FeaturePoint.PlaintextFeature:
+    # The Security record (type 55) is XOR-only: its 256-byte body is a bounded
+    # 2048-bit value, not AES output. Never run AES on it or touch an IV chain.
+    if fp in (FeaturePoint.PlaintextFeature, FeaturePoint.SecurityFeature):
         return xor_decoded, keychain
 
     pair = keychain.get(fp)

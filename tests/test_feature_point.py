@@ -35,6 +35,8 @@ def test_record_type_mapping_v14():
     assert feature_point_from_record_type(49, 14) == FeaturePoint.AirLinkFeature
     assert feature_point_from_record_type(56, 14) == FeaturePoint.PlaintextFeature
     assert feature_point_from_record_type(57, 14) == FeaturePoint.AirLinkFeature
+    assert feature_point_from_record_type(253, 14) == FeaturePoint.DJIFlyCustomFeature
+    assert feature_point_from_record_type(254, 14) == FeaturePoint.DJIFlyCustomFeature
 
 
 def test_record_type_mapping_v13():
@@ -43,6 +45,8 @@ def test_record_type_mapping_v13():
     assert feature_point_from_record_type(4, 13) == FeaturePoint.BaseFeature
     assert feature_point_from_record_type(7, 13) == FeaturePoint.BaseFeature
     assert feature_point_from_record_type(25, 13) == FeaturePoint.BaseFeature
+    assert feature_point_from_record_type(253, 13) == FeaturePoint.PlaintextFeature  # unverified
+    assert feature_point_from_record_type(254, 13) == FeaturePoint.PlaintextFeature  # unverified
 
 
 def test_from_api_name():

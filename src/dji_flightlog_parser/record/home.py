@@ -6,6 +6,7 @@ import math
 import struct
 from dataclasses import dataclass
 from enum import IntEnum
+from typing import Optional
 
 
 class CompassCalibrationState(IntEnum):
@@ -62,6 +63,7 @@ class Home:
     is_near_distance_limit: bool = False
     is_near_height_limit: bool = False
     is_multiple_mode_open: bool = False
+    has_go_home: bool = False
     is_beginner_mode: bool = False
     is_ioc_open: bool = False
     ioc_mode: IOCMode = IOCMode.CourseLock
@@ -74,6 +76,8 @@ class Home:
     record_sd_left_time: int = 0
     current_flight_record_index: int = 0
     max_allowed_height: float = 0.0
+    # Lifetime takeoff counter of the aircraft (u16@98, 102-byte records only).
+    aircraft_flight_count: Optional[int] = None
 
     @classmethod
     def from_bytes(cls, data: bytes, version: int = 14) -> Home:
@@ -85,6 +89,9 @@ class Home:
         h.latitude = math.degrees(struct.unpack_from("<d", data, 8)[0])
         h.altitude = struct.unpack_from("<f", data, 16)[0] / 10.0
 
+        # Bytes 20-21 are the DUML u16 home_state (flyc.lua): 0x0080 has_go_home,
+        # 0x0800 beginner_mode, 0x1000 ioc_enable, 0xE000 ioc_mode; upstream
+        # home.rs agrees. The three flags are 0 in every Home record of 74 logs.
         if len(data) > 20:
             bp1 = data[20]
             h.is_home_record = bool(bp1 & 0x01)
@@ -94,13 +101,14 @@ class Home:
             h.is_near_distance_limit = bool(bp1 & 0x10)
             h.is_near_height_limit = bool(bp1 & 0x20)
             h.is_multiple_mode_open = bool(bp1 & 0x40)
-            h.is_beginner_mode = bool(bp1 & 0x80)
+            h.has_go_home = bool(bp1 & 0x80)
 
         if len(data) > 21:
             bp2 = data[21]
             h.compass_state = CompassCalibrationState(_sub_byte(bp2, 0x03))
             h.is_compass_adjust = bool(bp2 & 0x04)
-            h.is_ioc_open = bool(bp2 & 0x08)
+            h.is_beginner_mode = bool(bp2 & 0x08)
+            h.is_ioc_open = bool(bp2 & 0x10)
             h.ioc_mode = IOCMode(_sub_byte(bp2, 0xE0))
 
         if len(data) > 23:
@@ -121,5 +129,10 @@ class Home:
             # 5 unknown bytes at offset 32
             if len(data) > 40:
                 h.max_allowed_height = struct.unpack_from("<f", data, 37)[0]
+
+        if len(data) >= 102:
+            # Checked on 9 logs (Mini 5 Pro, Neo 2; 4 aircraft): continuous across
+            # logs of the same aircraft, +1 once per log at the takeoff record.
+            h.aircraft_flight_count = struct.unpack_from("<H", data, 98)[0]
 
         return h

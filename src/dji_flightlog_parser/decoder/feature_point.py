@@ -119,6 +119,12 @@ _V14_MAP: dict[int, FeaturePoint] = {
     59: FeaturePoint.BaseFeature,           # FCIMUInfo
     62: FeaturePoint.RCFeature,             # RCDisplayField
     63: FeaturePoint.BaseFeature,           # FlightControllerCommonOSD
+    # Not emitted as records, but they share the DJIFlyCustom IV chain with
+    # tips, warnings, Custom, GOBusiness and the other types mapped to it
+    # above (253 carries a component serial-number list,
+    # among other things). Checked on 70 v14 logs; v13 is unverified.
+    253: FeaturePoint.DJIFlyCustomFeature,
+    254: FeaturePoint.DJIFlyCustomFeature,
 }
 
 _V13_MAP: dict[int, FeaturePoint] = {

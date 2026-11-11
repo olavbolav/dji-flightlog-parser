@@ -112,6 +112,40 @@ class CenterBattery:
 
 @dataclass
 class SmartBattery:
+    """FlyC smart battery status (record type 8, DUML flyc 0x51).
+
+    Layout (30 bytes on M300/M350; Mavic Mini v12 writes 31, the last byte is
+    a framing artefact): 0 useful_time u16, 2 go_home_time u16, 4 land_time u16,
+    6 go_home_battery u16, 8 land_battery u16, 10 safe_fly_radius f32,
+    14 volume_consume f32, 18 status u32, 22 go_home_status u8,
+    23 go_home_countdown u8, 24 voltage u16 mV, 26 percent u8, 27 low warning,
+    28 serious low warning, 29 reserved (always 0).
+
+    Bytes 0-9 are the FlyC smart-RTH estimates (the same quantities FCCommonOSD
+    type 63 carries on newer aircraft, which have no type 8):
+
+    - ``useful_time``: remaining flight time in seconds.
+    - ``go_home_time`` / ``land_time``: seconds needed to return home / to land
+      from the current position and height.
+    - ``go_home_battery`` / ``land_battery``: battery percent needed to return
+      home / to land.
+
+    Checked on 28 logs: ``useful_time`` reads 0 for the first 22-41 s of a
+    log (median about 24 s; 152 s or the whole log in two M300 logs),
+    ``land_time`` is 0 until the aircraft climbs,
+    and the go-home fields are filled from the first record on M300/M350
+    but stay 0 on Mavic Mini. Treat 0 as "no estimate yet".
+
+    ``status`` is the battery warning level: 0 normal, 1 low battery (the
+    charge reached the low-battery threshold), 2 critically low (it reached
+    the critical threshold). Checked on 24 M300/M350 logs (9 with
+    transitions): every transition happens exactly at the threshold carried
+    in bytes 27/28.
+
+    ``safe_fly_radius`` and ``volume_consume`` do not match their names
+    (thousands to hundreds of thousands); their meaning is unknown.
+    """
+
     useful_time: int = 0
     go_home_time: int = 0
     land_time: int = 0
@@ -132,56 +166,44 @@ class SmartBattery:
     @classmethod
     def from_bytes(cls, data: bytes, version: int = 14) -> SmartBattery:
         b = cls()
-        if len(data) < 10:
+        n = len(data)
+        if n < 10:
             return b
 
-        offset = 0
-        if offset + 2 <= len(data):
-            b.useful_time = struct.unpack_from("<H", data, offset)[0]
-            offset += 2
-        if offset + 2 <= len(data):
-            b.go_home_time = struct.unpack_from("<H", data, offset)[0]
-            offset += 2
-        if offset + 2 <= len(data):
-            b.land_time = struct.unpack_from("<H", data, offset)[0]
-            offset += 2
-        if offset + 2 <= len(data):
-            b.go_home_battery = struct.unpack_from("<H", data, offset)[0]
-            offset += 2
-        if offset + 2 <= len(data):
-            b.land_battery = struct.unpack_from("<H", data, offset)[0]
-            offset += 2
-        if offset + 4 <= len(data):
-            b.safe_fly_radius = struct.unpack_from("<f", data, offset)[0]
-            offset += 4
-        if offset + 4 <= len(data):
-            b.volume_consume = struct.unpack_from("<f", data, offset)[0]
-            offset += 4
-        if offset + 4 <= len(data):
-            b.status = struct.unpack_from("<I", data, offset)[0]
-            offset += 4
-        if offset + 1 <= len(data):
-            b.go_home_status = data[offset]
-            offset += 1
-        if offset + 2 <= len(data):
-            b.go_home_countdown = struct.unpack_from("<H", data, offset)[0]
-            offset += 2
-        if offset + 2 <= len(data):
-            b.voltage = struct.unpack_from("<H", data, offset)[0] / 1000.0
-            offset += 2
-        if offset + 1 <= len(data):
-            b.percent = data[offset]
-            offset += 1
+        # Fixed offsets, so a truncated record leaves the missing fields at
+        # their defaults instead of shifting later fields.
+        b.useful_time, b.go_home_time, b.land_time, b.go_home_battery, b.land_battery = (
+            struct.unpack_from("<5H", data, 0))
+        if n >= 14:
+            b.safe_fly_radius = struct.unpack_from("<f", data, 10)[0]
+        if n >= 18:
+            b.volume_consume = struct.unpack_from("<f", data, 14)[0]
+        if n >= 22:
+            b.status = struct.unpack_from("<I", data, 18)[0]
+        if n >= 23:
+            b.go_home_status = data[22]
+        # go_home_countdown is a u8 (upstream smart_battery.rs, DUML flyc 0x51).
+        # Reading it as u16 shifted every later field by one byte. Checked on
+        # 28 logs (M300/M350/Mavic Mini): u16@24 matches the SmartBatteryGroup
+        # dynamic index-0 voltage (median |diff| 5-16 mV) and byte 26 equals
+        # its SOC in all 5472 ticks where both are logged.
+        if n >= 24:
+            b.go_home_countdown = data[23]
+        if n >= 26:
+            b.voltage = struct.unpack_from("<H", data, 24)[0] / 1000.0
+        if n >= 27:
+            b.percent = data[26]
 
-        if offset + 1 <= len(data):
-            bp1 = data[offset]
-            b.low_warning = _sub_byte(bp1, 0x7F)
-            b.low_warning_go_home = _sub_byte(bp1, 0x80)
-            offset += 1
-
-        if offset + 1 <= len(data):
-            bp2 = data[offset]
-            b.serious_low_warning = _sub_byte(bp2, 0x7F)
-            b.serious_low_warning_landing = _sub_byte(bp2, 0x80)
+        # Byte 27: low-battery threshold in percent (0x7F) and the "go home at
+        # low battery" action flag (0x80). Byte 28: critical threshold (0x7F)
+        # and the "land at critical battery" flag (0x80). Both equal OSD bytes
+        # 45/46. Corpus: low 20/25/30, critical 5/10/15/20, landing flag always
+        # set, go-home flag never set. Byte 29 is reserved (always 0).
+        if n >= 28:
+            b.low_warning = _sub_byte(data[27], 0x7F)
+            b.low_warning_go_home = _sub_byte(data[27], 0x80)
+        if n >= 29:
+            b.serious_low_warning = _sub_byte(data[28], 0x7F)
+            b.serious_low_warning_landing = _sub_byte(data[28], 0x80)
 
         return b
