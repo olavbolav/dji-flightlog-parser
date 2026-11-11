@@ -11,7 +11,6 @@ from typing import Optional
 from .layout.prefix import Prefix, PREFIX_SIZE
 from .layout.auxiliary import Auxiliary, Department
 from .layout.details import Details
-from .decoder.aes import decode_record_payload
 from .decoder.feature_point import FeaturePoint
 from .keychain.models import (
     Keychain, KeychainsRequest, EncodedKeychainFeaturePoint,
@@ -22,10 +21,22 @@ from .keychain.cache import KeychainCache
 from .record.osd import OSD
 from .record.reader import RecordReader, Record
 from .record.types import RecordType
-from .frame.builder import records_to_frames
+from .frame.builder import battery_layout, records_to_frames
 from .frame.models import Frame
 
 logger = logging.getLogger(__name__)
+
+# Plausible ranges (inclusive) for record-derived summary values; a value
+# outside its range is treated as unknown. Valid for correctly decrypted logs.
+_WARNING_THRESHOLD_RANGE = (1, 100)  # OSD battery warning thresholds, %
+_STATE_OF_HEALTH_RANGE = (1, 110)  # static `life`, %; M400 reads up to 101
+_WIND_SPEED_RANGE = (0.0, 40.0)  # OSD wind speed, m/s
+_FLIGHT_COUNT_RANGE = (1, 1_000_000)  # Home aircraft_flight_count
+
+
+def _in_range(value, bounds: tuple) -> bool:
+    return value is not None and bounds[0] <= value <= bounds[1]
+
 
 # Departments tried, in order, when the DJI API rejects the department in the
 # log header. Logs recorded through the Mobile SDK carry department=SDK, which
@@ -280,9 +291,11 @@ class DJILog:
 
         # For v13+, use keychains with rotation on KeyStorageRecover
         if self.version >= 13 and keychains is not None:
-            if len(keychains) == 0:
-                logger.warning("Empty keychains list for v%d file; records will not be decrypted", self.version)
-            else:
+            if not any(keychains):
+                # [] or only empty keychains ([{}]): nothing to decrypt with
+                logger.warning("No keys in keychains list for v%d file; records will not be decrypted",
+                               self.version)
+            if keychains:
                 result = self._read_records_with_keychains(record_data, keychains, product_type)
                 self.enrich_details(result)
                 return result
@@ -309,6 +322,7 @@ class DJILog:
         record_parser = RecordReader(b"", version, product_type)
 
         import struct
+        from .record.reader import KEY_VALUE_CHANGE, emits_key_value_record
         while offset < len(record_data):
             if offset >= len(record_data):
                 break
@@ -351,25 +365,29 @@ class DJILog:
                     offset += 1
                 continue
 
-            # 0xFD/0xFE records are not parsed, but in v14 they are encrypted in
-            # the DJIFlyCustom IV chain. Skipping them without decoding leaves the
-            # next Custom/AppTip/AppWarn/AppSeriousWarn record with a stale IV and
-            # a garbled first 16 bytes.
-            if record_type_val in (0xFD, 0xFE):
-                _, current_kc = decode_record_payload(
+            # Records 0xFD/0xFE are always decrypted to keep the DJIFlyCustom
+            # IV chain intact; only 0xFD on v14 is emitted, as
+            # KeyValueSnapshot (see RecordReader._read_one)
+            if record_type_val in (RecordType.KeyValueSnapshot, KEY_VALUE_CHANGE):
+                from .decoder.aes import decode_record_payload
+                decoded, current_kc = decode_record_payload(
                     raw_payload, record_type_val, version, current_kc, length
                 )
+                if emits_key_value_record(record_type_val, version):
+                    all_records.append(record_parser._parse_record(record_type_val, decoded, length))
                 offset = payload_end
                 if offset < len(record_data) and record_data[offset] == 0xFF:
                     offset += 1
                 continue
 
             # Decode payload
+            from .decoder.aes import decode_record_payload
             decoded, current_kc = decode_record_payload(
                 raw_payload, record_type_val, version, current_kc, length
             )
 
-            record = record_parser._parse_record(record_type_val, decoded, length)
+            seed = raw_payload[0] if raw_payload else None
+            record = record_parser._parse_record(record_type_val, decoded, length, seed)
             all_records.append(record)
 
             offset = payload_end
@@ -382,7 +400,7 @@ class DJILog:
         """Parse records and convert to normalized frames."""
         records = self.records(keychains)
         self._last_records = records
-        return records_to_frames(records, self.details)
+        return records_to_frames(records, self.details, version=self.version)
 
     def enrich_details(self, records: list[Record]) -> None:
         """Enrich details from ComponentSerial records.
@@ -453,7 +471,12 @@ def parse_file(
 
     records = log.records(keychains)
     log._last_records = records
-    frames = records_to_frames(records, log.details)
+    # No key, an empty keychain list or a list of empty keychains ([{}],
+    # what the API gives when it answers with unusable items): v13+ records
+    # are still encrypted, so the summary leaves out every value derived
+    # from them
+    log._undecrypted = log.version >= 13 and not any(keychains or [])
+    frames = records_to_frames(records, log.details, version=log.version)
 
     details_dict = log.details.to_dict()
     summary = _build_summary(log, frames, details_dict)
@@ -467,7 +490,12 @@ def parse_file(
 
 
 def _build_summary(log: DJILog, frames: list[Frame], details_dict: dict) -> dict:
-    """Build a summary dict compatible with Loggflyt expectations."""
+    """Build a summary dict compatible with Loggflyt expectations.
+
+    When ``log._undecrypted`` is set (v13+ parsed without keys, see
+    ``parse_file``), only the values from the log header (details) are used;
+    every value derived from the still-encrypted records is left out.
+    """
     summary = {
         "startTime": details_dict.get("startTime"),
         "startCoordinate": details_dict.get("startCoordinate"),
@@ -485,6 +513,9 @@ def _build_summary(log: DJILog, frames: list[Frame], details_dict: dict) -> dict
         "appVersion": details_dict.get("appVersion", ""),
         "productType": details_dict.get("productType", ""),
     }
+
+    if getattr(log, "_undecrypted", False):
+        return summary
 
     # Try to fill in from recover records in frames (often more complete)
     for f in frames:
@@ -508,38 +539,95 @@ def _build_summary(log: DJILog, frames: list[Frame], details_dict: dict) -> dict
 
 
 def _enrich_summary(log: DJILog, frames: list[Frame], summary: dict) -> None:
-    """Add component serials, firmware, and battery health to summary."""
+    """Add component serials, firmware, battery health and per-log settings to summary.
+
+    Keys are added only when the log carries the value, and none at all when
+    ``log._undecrypted`` is set (the records are encrypted noise then).
+    """
+    from .record.camera import Camera, camera_model_name
     from .record.component_serial import ComponentSerial
     from .record.firmware import Firmware
+    from .record.home import Home
+    from .record.key_value_snapshot import KEY_SNAPSHOT, MODULE_COMPONENT_SERIALS, KeyValueSnapshot
+    from .record.mc_params import FailSafe, MCParams
+    from .record.smart_battery_group import SmartBatteryGroup, SmartBatteryStatic
 
     records = getattr(log, "_last_records", None)
-    if records is None:
+    if records is None or getattr(log, "_undecrypted", False):
         return
 
     component_serials: dict[str, str] = {}
     firmware_versions: list[dict] = []
     firmware_seen: set[tuple] = set()
+    camera_type = None
+    statics: dict[int, SmartBatteryStatic] = {}  # first static record per pack index
+    serial_snapshot: Optional[KeyValueSnapshot] = None
+    rc_lost_action: Optional[str] = None
+    low_threshold: Optional[int] = None
+    critical_threshold: Optional[int] = None
+    aircraft_flight_count: Optional[int] = None
+    max_wind_speed: Optional[float] = None
 
     for r in records:
-        if isinstance(r.data, ComponentSerial) and r.data.serial:
+        d = r.data
+        if isinstance(d, OSD):
+            # Thresholds are constant within every log and set from the first
+            # record (checked on 74 logs); take the first plausible value.
+            if low_threshold is None and _in_range(d.low_battery_warning, _WARNING_THRESHOLD_RANGE):
+                low_threshold = d.low_battery_warning
+            if critical_threshold is None and _in_range(d.critical_battery_warning, _WARNING_THRESHOLD_RANGE):
+                critical_threshold = d.critical_battery_warning
+            if (_in_range(d.wind_speed, _WIND_SPEED_RANGE)
+                    and (max_wind_speed is None or d.wind_speed > max_wind_speed)):
+                max_wind_speed = d.wind_speed
+
+        elif isinstance(d, SmartBatteryGroup):
+            if d.static is not None:
+                statics.setdefault(d.static.index, d.static)
+
+        elif isinstance(d, Home):
+            # Goes up by one at take-off; the last value includes this flight
+            if _in_range(d.aircraft_flight_count, _FLIGHT_COUNT_RANGE):
+                aircraft_flight_count = d.aircraft_flight_count
+
+        elif isinstance(d, MCParams):
+            if rc_lost_action is None and d.fail_safe != FailSafe.UNKNOWN:
+                rc_lost_action = d.fail_safe.name
+
+        elif isinstance(d, KeyValueSnapshot):
+            # Repeated snapshots within a log are identical; take the first
+            if serial_snapshot is None and (d.module, d.key) == (MODULE_COMPONENT_SERIALS, KEY_SNAPSHOT):
+                serial_snapshot = d
+
+        elif isinstance(r.data, ComponentSerial) and r.data.serial:
             comp_name = r.data.component_type.name
             component_serials[comp_name] = r.data.serial
 
-        if isinstance(r.data, Firmware) and r.data.version:
-            key = (r.data.sender_type, r.data.sub_sender_type, r.data.version)
-            if key not in firmware_seen:
-                firmware_seen.add(key)
-                firmware_versions.append({
-                    "senderType": r.data.sender_type,
-                    "subSenderType": r.data.sub_sender_type,
-                    "version": r.data.version,
-                })
+        elif isinstance(r.data, Firmware):
+            for e in r.data.entries:
+                key = (e.sender_type, e.sub_sender_type, e.full_version)
+                if key not in firmware_seen:
+                    firmware_seen.add(key)
+                    firmware_versions.append({
+                        "senderType": e.sender_type,
+                        "subSenderType": e.sub_sender_type,
+                        "version": e.version,
+                        "senderName": e.sender_name,
+                        "fullVersion": e.full_version,
+                    })
+
+        elif camera_type is None and isinstance(r.data, Camera):
+            camera_type = r.data.camera_type
 
     if component_serials:
         summary["componentSerials"] = component_serials
 
     if firmware_versions:
         summary["firmwareVersions"] = firmware_versions
+
+    if camera_type is not None:
+        summary["cameraType"] = camera_type
+        summary["cameraModel"] = camera_model_name(camera_type)
 
     for f in frames:
         b = f.battery
@@ -551,3 +639,45 @@ def _enrich_summary(log: DJILog, frames: list[Frame], summary: dict) -> None:
             summary["batterySerial"] = b.battery_serial
         if b.cycle_count is not None:
             break
+
+    if statics:
+        # The pack the frames use: index 1, else 2 (dual battery), else 0
+        primary = statics.get(battery_layout(records).static_index)
+        if primary is not None:
+            if _in_range(primary.life, _STATE_OF_HEALTH_RANGE):  # 0 = unknown (Mini 5 Pro)
+                summary["batteryStateOfHealth"] = primary.life
+            if primary.manufacture_date:
+                summary["batteryManufactureDate"] = primary.manufacture_date
+        summary["batteries"] = [_static_summary(statics[i]) for i in sorted(statics)]
+
+    if serial_snapshot is not None:
+        # Fields 7 and 8 are battery slots 1 and 2 (slot order, not pack
+        # index); field 6 is an accessory, only seen on M4TD.
+        battery_sns = [serial_snapshot.serials[n] for n in (7, 8) if serial_snapshot.serials.get(n)]
+        if battery_sns:
+            summary["batterySns"] = battery_sns
+        accessory_sn = serial_snapshot.serials.get(6)
+        if accessory_sn:
+            summary["accessorySn"] = accessory_sn
+
+    if rc_lost_action is not None:
+        summary["rcLostAction"] = rc_lost_action
+    if low_threshold is not None:
+        summary["lowBatteryWarningThreshold"] = low_threshold
+    if critical_threshold is not None:
+        summary["criticalBatteryWarningThreshold"] = critical_threshold
+    if aircraft_flight_count is not None:
+        summary["aircraftFlightCount"] = aircraft_flight_count
+    if max_wind_speed is not None:
+        summary["maxWindSpeed"] = max_wind_speed
+
+
+def _static_summary(s) -> dict:
+    """Summary entry for one SmartBatteryGroup static record (unknown values are None)."""
+    return {
+        "index": s.index,
+        "cycleCount": s.loop_times if s.loop_times > 0 else None,
+        "designedCapacity": s.designed_capacity if 0 < s.designed_capacity < 100000 else None,
+        "stateOfHealth": s.life if _in_range(s.life, _STATE_OF_HEALTH_RANGE) else None,
+        "manufactureDate": s.manufacture_date,
+    }

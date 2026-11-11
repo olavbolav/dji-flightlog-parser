@@ -6,6 +6,7 @@ import math
 import struct
 from dataclasses import dataclass
 from enum import IntEnum
+from typing import Optional
 
 
 class FlightMode(IntEnum):
@@ -302,14 +303,23 @@ class DroneType(IntEnum):
     Phantom4ProV2 = 36
     Mavic2 = 41
     Mavic2Enterprise = 51
+    # 53/67/100/103/104/112/124: constant per log and 1:1 with the aircraft model
+    # in all 74 corpus logs (details product type / aircraft name).
+    MavicMini = 53
     MavicAir2 = 58
     Matrice300RTK = 60
     Mini2 = 63
+    Matrice30 = 67
     Mavic3Enterprise = 77
     Mavic3Pro = 84
     Matrice350RTK = 89
     Mini4Pro = 93
     Avata2 = 94
+    Matrice4D = 100
+    Matrice400 = 103
+    Neo = 104
+    Mini5Pro = 112
+    Neo2 = 124
 
     @classmethod
     def _missing_(cls, value: object) -> DroneType:
@@ -342,6 +352,37 @@ class ImuInitFailReason(IntEnum):
         obj._name_ = f"Unknown({value})"
         obj._value_ = value
         return obj
+
+
+# Byte 64 low nibble: the direction the wind blows FROM, clockwise from north.
+# 0 means calm / no estimate (it only occurs together with wind speed 0).
+WIND_DIRECTION_NAMES: dict[int, str] = {
+    1: "N", 2: "NE", 3: "E", 4: "SE", 5: "S", 6: "SW", 7: "W", 8: "NW",
+}
+
+# Byte 63 = 255 (25.5 m/s) is treated as "no estimate": wind speed and
+# direction are then None. Checked on 74 decrypted logs: 0 of 729,800 OSD
+# records long enough to carry it (maximum 15.3 m/s). Undecrypted v14 records
+# (no keychain) produce it as noise: 375 of 91,915 in 17 of 18 such logs.
+WIND_SPEED_INVALID = 0xFF
+
+# Byte 60: positioning source used by the flight controller.
+POSITION_SOURCE_NAMES: dict[int, str] = {
+    0: "None",
+    1: "Vision",
+    2: "GNSS",
+    3: "RTKFixed",
+}
+
+
+def wind_direction_name(code: int) -> Optional[str]:
+    """Name of a wind direction code; None for calm (0) and undefined codes."""
+    return WIND_DIRECTION_NAMES.get(code)
+
+
+def position_source_name(code: int) -> str:
+    """Name of a position source code; ``Unknown(n)`` for undefined codes."""
+    return POSITION_SOURCE_NAMES.get(code, f"Unknown({code})")
 
 
 def _sub_byte(byte_val: int, mask: int) -> int:
@@ -395,13 +436,37 @@ class OSD:
     motor_start_failed_cause: MotorStartFailedCause = MotorStartFailedCause.NONE
     non_gps_cause: NonGPSCause = NonGPSCause.Already
     waypoint_limit_mode: bool = False
-    battery: int = 0
+    # Byte 40 is a rolling counter (+5 per OSD record, modulo 255), not battery
+    # percent. Checked on 74 logs: no correlation with battery state of charge.
+    sequence_counter: int = 0
     s_wave_height: float = 0.0
     fly_time: float = 0.0
     motor_revolution: int = 0
+    # User-set battery warning levels in percent (bytes 45/46, DUML bat_alarm1/2).
+    # Constant within each of 74 logs; voltage_warning fires against these levels.
+    # The flags are bit 7 (DUML "function"): low -> go home, critical -> land.
+    low_battery_warning: int = 0
+    low_battery_warning_go_home: bool = False
+    critical_battery_warning: int = 0
+    critical_battery_warning_landing: bool = False
     version_c: int = 0
     drone_type: DroneType | int = 0
     imu_init_fail_reason: ImuInitFailReason = ImuInitFailReason.MonitorError
+    # Yaw rate in deg/s, positive = clockwise seen from above (i16@53, 0.1 deg/s).
+    yaw_rate: Optional[float] = None
+    # Positioning source (u8@60): 0 None, 1 Vision, 2 GNSS, 3 RTKFixed.
+    position_source_code: Optional[int] = None
+    position_source: Optional[str] = None
+    # Wind estimate from the flight controller: speed in m/s (u8@63, 0.1 m/s) and
+    # the direction it blows FROM (u8@64 & 0x0F, 8 sectors; None when calm).
+    # All three stay None when byte 63 is 255 (WIND_SPEED_INVALID).
+    wind_speed: Optional[float] = None
+    wind_direction_code: Optional[int] = None
+    wind_direction: Optional[str] = None
+    # Aircraft position relative to the home point in metres (f32@74, f32@78).
+    # Both are 0.0 while no home point is set.
+    home_offset_north: Optional[float] = None
+    home_offset_east: Optional[float] = None
 
     @classmethod
     def from_bytes(cls, data: bytes, version: int = 14) -> OSD:
@@ -474,13 +539,20 @@ class OSD:
             o.waypoint_limit_mode = bool(bp6 & 0x10)
 
         if len(data) > 40:
-            o.battery = data[40]
+            o.sequence_counter = data[40]
         if len(data) > 41:
             o.s_wave_height = data[41] / 10.0
         if len(data) > 43:
             o.fly_time = struct.unpack_from("<H", data, 42)[0] / 10.0
         if len(data) > 44:
             o.motor_revolution = data[44]
+        if len(data) > 46:
+            # Checked on 74 logs (all 9 families, also the 56-byte v12 record):
+            # bytes 45/46 equal SmartBattery bytes 27/28 in 100% of rows.
+            o.low_battery_warning = data[45] & 0x7F
+            o.low_battery_warning_go_home = bool(data[45] & 0x80)
+            o.critical_battery_warning = data[46] & 0x7F
+            o.critical_battery_warning_landing = bool(data[46] & 0x80)
         if len(data) > 47:
             o.version_c = data[47]
 
@@ -490,5 +562,35 @@ class OSD:
             offset += 1
         if version >= 3 and len(data) > offset:
             o.imu_init_fail_reason = ImuInitFailReason(data[offset])
+
+        # Record lengths: 56 (v12 Mavic Mini), 68 (M300/M350), 70/71 (M30),
+        # 84 (Neo), 85 (M400, M4TD, Mini 5 Pro, Neo 2). Fields beyond the end of
+        # the record stay None.
+        if len(data) >= 55:
+            # Checked on 74 logs: integrated over 1 s it matches the OSD yaw
+            # change (per-family median r 0.96-0.995); scale 0.1 deg/s.
+            o.yaw_rate = struct.unpack_from("<h", data, 53)[0] / 10.0
+        if len(data) >= 61:
+            # Checked on 70 v14 logs: 3 only with RTK solution Fixed (accepted by
+            # the FC, may lag the fix by ~20 s), 1 only when vision-positioned
+            # without GNSS, 0 with neither.
+            o.position_source_code = data[60]
+            o.position_source = position_source_name(data[60])
+        if len(data) >= 65 and data[63] != WIND_SPEED_INVALID:
+            # Checked on 70 v14 logs: in hover the aircraft tilts towards the
+            # sector ("from" convention; within 45 deg in 90-99% of rows at
+            # >= 3 m/s), and cruise tilt follows ground speed plus this wind.
+            o.wind_speed = data[63] / 10.0
+            o.wind_direction_code = data[64] & 0x0F
+            o.wind_direction = wind_direction_name(o.wind_direction_code)
+        if len(data) >= 82:
+            # Checked on 43 logs (84/85-byte records): r >= 0.99 per log against
+            # the offset from OSD lat/lon minus the Home record position. 0.0/0.0
+            # means no home offset: 4518 of 4528 such rows have no GNSS fix
+            # (vision-only Neo/Neo2 flights).
+            north = struct.unpack_from("<f", data, 74)[0]
+            east = struct.unpack_from("<f", data, 78)[0]
+            o.home_offset_north = north if math.isfinite(north) else None
+            o.home_offset_east = east if math.isfinite(east) else None
 
         return o

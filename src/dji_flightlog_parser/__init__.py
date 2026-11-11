@@ -2,5 +2,5 @@
 
 from .parser import DJILog, parse_file
 
-__version__ = "0.2.1"
+__version__ = "0.3.0"
 __all__ = ["DJILog", "parse_file"]

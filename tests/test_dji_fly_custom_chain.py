@@ -1,7 +1,7 @@
 """Offline tests for the DJIFlyCustom AES IV chain in v14 record streams.
 
 Custom (5), AppTip (9), AppWarn (10) and AppSeriousWarn (24) share one IV chain
-with the unparsed 0xFD/0xFE records. If 0xFD/0xFE are skipped without decoding,
+with the 0xFD (KeyValueSnapshot) and 0xFE records. If 0xFD/0xFE are skipped without decoding,
 the next record in the chain decrypts with a stale IV and its first 16 bytes
 come out as garbage.
 """
@@ -16,17 +16,21 @@ from cryptography.hazmat.primitives.padding import PKCS7
 from dji_flightlog_parser import DJILog
 from dji_flightlog_parser.decoder.feature_point import FeaturePoint, feature_point_from_record_type
 from dji_flightlog_parser.decoder.xor import xor_decode_block
+from dji_flightlog_parser.record.key_value_snapshot import KEY_SNAPSHOT, MODULE_COMPONENT_SERIALS
 from dji_flightlog_parser.record.reader import RecordReader
 from dji_flightlog_parser.record.types import RecordType
 
 KEY = bytes(range(32))
 IV = bytes(range(100, 116))
 
-TIMESTAMP_MS = 1_752_767_568_123
+TIMESTAMP_MS = 1_893_456_000_123  # synthetic: 2030-01-01T00:00:00.123Z
 
-# 0xFD/0xFE plaintexts as seen in real v14 logs (contents are not parsed).
-FE_PLAINTEXT = bytes.fromhex("05000200020000000802")
-FD_PLAINTEXT = bytes.fromhex("0500010009000080efe759709f01000009005058") + b"|kf\x17A"
+# Synthetic 0xFE payload (not parsed) and a synthetic 0xFD KeyValueSnapshot:
+# header (module, key, payload length, 0, flags) + one protobuf serial field
+FE_PLAINTEXT = b"\x00\x01synthetic"
+_FD_SERIAL = b"TESTCAM0000001"
+_FD_PAYLOAD = bytes([(1 << 3) | 2, len(_FD_SERIAL)]) + _FD_SERIAL
+FD_PLAINTEXT = struct.pack("<HHHBB", MODULE_COMPONENT_SERIALS, KEY_SNAPSHOT, len(_FD_PAYLOAD), 0, 0) + _FD_PAYLOAD
 
 SEQUENCE = [
     (RecordType.Custom, b"\x01\x00" + struct.pack("<ffq", 12.5, 340.0, TIMESTAMP_MS)),
@@ -93,15 +97,16 @@ def test_fd_fe_map_to_dji_fly_custom_in_v14():
 def test_fd_fe_records_advance_dji_fly_custom_iv_chain(read):
     records = read(_stream())
 
-    # 0xFD/0xFE are consumed for the IV chain but not emitted.
+    # 0xFE is consumed for the IV chain only; 0xFD is emitted as KeyValueSnapshot.
     assert [int(r.record_type) for r in records] == [
-        RecordType.Custom, RecordType.AppWarn, RecordType.AppTip, RecordType.Custom,
+        RecordType.Custom, RecordType.AppWarn, RecordType.KeyValueSnapshot, RecordType.AppTip, RecordType.Custom,
     ]
 
     assert records[1].data.message == "Remote Controller Signal Weak"
-    assert records[2].data.message == "Switched to Normal (N) mode"
+    assert records[2].data.serials == {1: "TESTCAM0000001"}
+    assert records[3].data.message == "Switched to Normal (N) mode"
 
-    first, last = records[0].data, records[3].data
+    first, last = records[0].data, records[4].data
     assert (first.camera_shoot, first.video_shoot, first.h_speed, first.distance) == (True, False, 12.5, 340.0)
     assert (last.camera_shoot, last.video_shoot, last.h_speed, last.distance) == (False, True, 3.0, 341.5)
     assert last.update_timestamp == datetime.fromtimestamp((TIMESTAMP_MS + 100) / 1000, tz=timezone.utc)

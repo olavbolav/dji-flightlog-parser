@@ -104,7 +104,199 @@ def test_osd_imu_init_fail_default():
 
 
 def test_osd_drone_type_unknown():
-    data = _make_osd_data(drone_type=100)
+    data = _make_osd_data(drone_type=250)
     osd = OSD.from_bytes(data)
-    assert osd.drone_type.value == 100
-    assert osd.drone_type.name == "100"
+    assert osd.drone_type.value == 250
+    assert osd.drone_type.name == "250"
+
+
+def test_osd_drone_type_new_names():
+    expected = {
+        53: "MavicMini", 60: "Matrice300RTK", 67: "Matrice30", 89: "Matrice350RTK",
+        100: "Matrice4D", 103: "Matrice400", 104: "Neo", 112: "Mini5Pro", 124: "Neo2",
+    }
+    for code, name in expected.items():
+        osd = OSD.from_bytes(_make_osd_data(drone_type=code))
+        assert osd.drone_type == DroneType(code)
+        assert osd.drone_type.name == name
+
+
+def _extend(data: bytes, length: int) -> bytearray:
+    """Pad a 50-byte synthetic OSD payload to a full record length."""
+    buf = bytearray(data)
+    buf.extend(b"\x00" * (length - len(buf)))
+    return buf
+
+
+def test_osd_sequence_counter_replaces_battery():
+    osd = OSD.from_bytes(_make_osd_data(battery_pct=137))
+    assert osd.sequence_counter == 137
+    assert not hasattr(osd, "battery")
+
+
+def test_osd_battery_warning_levels():
+    buf = bytearray(_make_osd_data())
+    buf[45] = 0x80 | 25
+    buf[46] = 0x80 | 15
+    osd = OSD.from_bytes(bytes(buf))
+    assert osd.low_battery_warning == 25
+    assert osd.low_battery_warning_go_home is True
+    assert osd.critical_battery_warning == 15
+    assert osd.critical_battery_warning_landing is True
+
+    buf[45] = 20
+    buf[46] = 10
+    osd = OSD.from_bytes(bytes(buf))
+    assert osd.low_battery_warning == 20
+    assert osd.low_battery_warning_go_home is False
+    assert osd.critical_battery_warning == 10
+    assert osd.critical_battery_warning_landing is False
+
+
+def test_osd_battery_warning_flags_are_per_byte():
+    # Only byte 45 has bit 7: go home set, landing clear
+    buf = bytearray(_make_osd_data())
+    buf[45] = 0x80 | 25
+    buf[46] = 15
+    osd = OSD.from_bytes(bytes(buf))
+    assert (osd.low_battery_warning, osd.critical_battery_warning) == (25, 15)
+    assert osd.low_battery_warning_go_home is True
+    assert osd.critical_battery_warning_landing is False
+
+    # Only byte 46 has bit 7: the reverse
+    buf[45] = 25
+    buf[46] = 0x80 | 15
+    osd = OSD.from_bytes(bytes(buf))
+    assert (osd.low_battery_warning, osd.critical_battery_warning) == (25, 15)
+    assert osd.low_battery_warning_go_home is False
+    assert osd.critical_battery_warning_landing is True
+
+
+def test_osd_battery_warning_short_record():
+    osd = OSD.from_bytes(_make_osd_data()[:46])
+    assert osd.low_battery_warning == 0
+    assert osd.critical_battery_warning == 0
+
+
+def test_osd_yaw_rate():
+    buf = _extend(_make_osd_data(), 56)
+    struct.pack_into("<h", buf, 53, -1234)
+    osd = OSD.from_bytes(bytes(buf))
+    assert osd.yaw_rate == -123.4
+    # A 56-byte v12 record has yaw rate but none of the v14 fields
+    assert osd.position_source is None
+    assert osd.position_source_code is None
+    assert osd.wind_speed is None
+    assert osd.wind_direction is None
+    assert osd.home_offset_north is None
+
+
+def test_osd_yaw_rate_missing_in_short_record():
+    osd = OSD.from_bytes(_make_osd_data())
+    assert osd.yaw_rate is None
+
+
+def test_osd_position_source():
+    names = {0: "None", 1: "Vision", 2: "GNSS", 3: "RTKFixed", 9: "Unknown(9)"}
+    for code, name in names.items():
+        buf = _extend(_make_osd_data(), 68)
+        buf[60] = code
+        osd = OSD.from_bytes(bytes(buf))
+        assert osd.position_source_code == code
+        assert osd.position_source == name
+
+
+def test_osd_wind():
+    buf = _extend(_make_osd_data(), 68)
+    buf[63] = 87
+    buf[64] = 3
+    osd = OSD.from_bytes(bytes(buf))
+    assert osd.wind_speed == 8.7
+    assert osd.wind_direction_code == 3
+    assert osd.wind_direction == "E"
+    # 68-byte records have no home offsets
+    assert osd.home_offset_north is None
+    assert osd.home_offset_east is None
+
+
+def test_osd_wind_direction_sectors_from_convention():
+    expected = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"]
+    for code, name in enumerate(expected, start=1):
+        buf = _extend(_make_osd_data(), 85)
+        buf[63] = 20
+        buf[64] = code
+        assert OSD.from_bytes(bytes(buf)).wind_direction == name
+
+
+def test_osd_wind_calm_maps_to_none():
+    buf = _extend(_make_osd_data(), 70)
+    buf[63] = 0
+    buf[64] = 0
+    osd = OSD.from_bytes(bytes(buf))
+    assert osd.wind_speed == 0.0
+    assert osd.wind_direction_code == 0
+    assert osd.wind_direction is None
+
+
+def test_osd_wind_direction_ignores_high_nibble():
+    buf = _extend(_make_osd_data(), 71)
+    buf[63] = 5
+    buf[64] = 0xA6
+    osd = OSD.from_bytes(bytes(buf))
+    assert osd.wind_direction_code == 6
+    assert osd.wind_direction == "SW"
+
+
+def test_osd_wind_speed_255_is_no_estimate():
+    for length in (68, 71, 85):
+        buf = _extend(_make_osd_data(), length)
+        buf[63] = 255
+        buf[64] = 3
+        osd = OSD.from_bytes(bytes(buf))
+        assert osd.wind_speed is None
+        assert osd.wind_direction_code is None
+        assert osd.wind_direction is None
+        # Neighbouring fields are still read
+        assert osd.position_source_code == 0
+    # 254 is still a value (25.4 m/s)
+    buf = _extend(_make_osd_data(), 85)
+    buf[63] = 254
+    buf[64] = 3
+    osd = OSD.from_bytes(bytes(buf))
+    assert osd.wind_speed == 25.4 and osd.wind_direction == "E"
+
+
+def test_osd_wind_missing_before_byte_64():
+    buf = _extend(_make_osd_data(), 64)
+    buf[63] = 50
+    osd = OSD.from_bytes(bytes(buf))
+    assert osd.wind_speed is None
+    assert osd.wind_direction_code is None
+    assert osd.position_source_code is not None
+
+
+def test_osd_home_offsets():
+    for length in (84, 85):
+        buf = _extend(_make_osd_data(), length)
+        struct.pack_into("<f", buf, 74, 123.5)
+        struct.pack_into("<f", buf, 78, -42.25)
+        osd = OSD.from_bytes(bytes(buf))
+        assert osd.home_offset_north == 123.5
+        assert osd.home_offset_east == -42.25
+
+
+def test_osd_home_offsets_non_finite_is_none():
+    buf = _extend(_make_osd_data(), 85)
+    struct.pack_into("<f", buf, 74, float("nan"))
+    struct.pack_into("<f", buf, 78, float("inf"))
+    osd = OSD.from_bytes(bytes(buf))
+    assert osd.home_offset_north is None
+    assert osd.home_offset_east is None
+
+
+def test_osd_home_offsets_missing_in_m30_record():
+    buf = _extend(_make_osd_data(), 71)
+    osd = OSD.from_bytes(bytes(buf))
+    assert osd.home_offset_north is None
+    assert osd.home_offset_east is None
+    assert osd.wind_speed == 0.0

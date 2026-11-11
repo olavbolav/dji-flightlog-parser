@@ -103,12 +103,23 @@ def _serialize_record_data(data: object) -> dict:
         result = {}
         for field_name in data.__dataclass_fields__:
             val = getattr(data, field_name)
-            if isinstance(val, bytes):
+            if isinstance(val, (bytes, bytearray)):
                 continue
-            if hasattr(val, 'name'):
-                val = val.name
-            if hasattr(val, 'isoformat'):
-                val = val.isoformat().replace("+00:00", "Z")
-            result[field_name] = val
+            result[field_name] = _serialize_value(val)
         return result
     return {"raw": str(data)}
+
+
+def _serialize_value(val: object) -> object:
+    """Serialize a field value; nested dataclasses and lists are expanded."""
+    if hasattr(val, "__dataclass_fields__"):
+        return _serialize_record_data(val)
+    if isinstance(val, (list, tuple)):
+        return [_serialize_value(v) for v in val if not isinstance(v, (bytes, bytearray))]
+    if isinstance(val, dict):
+        return {k: _serialize_value(v) for k, v in val.items() if not isinstance(v, (bytes, bytearray))}
+    if hasattr(val, 'name'):
+        return val.name
+    if hasattr(val, 'isoformat'):
+        return val.isoformat().replace("+00:00", "Z")
+    return val

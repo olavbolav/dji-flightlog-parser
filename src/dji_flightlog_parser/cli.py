@@ -28,7 +28,9 @@ from .export.csv_export import export_csv
 @click.option("--geojson", type=click.Path(), default=None, help="GeoJSON output path")
 @click.option("--kml", type=click.Path(), default=None, help="KML output path")
 @click.option("--csv", type=click.Path(), default=None, help="CSV output path")
-@click.option("--extended", is_flag=True, default=False, help="Include extended record types in output")
+@click.option("--extended", is_flag=True, default=False,
+              help="Add rtk, airLink, navigation, appHud and secondaryGimbal sections to frames, "
+                   "and extra keys (wind, battery packs, RC buttons, ...) to the existing sections")
 @click.option("--api-custom-department", type=int, default=None, help="Override department for keychain request")
 @click.option("--api-custom-version", type=int, default=None, help="Override version for keychain request")
 @click.option("--no-cache", is_flag=True, default=False, help="Disable keychain caching")
@@ -70,7 +72,7 @@ def main(
 
     records = log.records(keychains)
     log.enrich_details(records)
-    frames = records_to_frames(records, log.details)
+    frames = records_to_frames(records, log.details, extended=extended, version=log.version)
 
     # JSON export
     if raw:
